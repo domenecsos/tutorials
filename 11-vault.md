@@ -255,7 +255,7 @@ vault login hvs.MbBT9J9ZXyGvlJCjV8CG1IjD
 	identity_policies    []
 	policies             ["root"]
 ```
-## Playground: Crear secretos
+### Playground: Crear secretos
 
 >Now that all the permissions are set up, it is time to create a secret to store into Vault. The example application in the later section of this article expects a database username and password stored in the ceh/database/credentials Vault path. To create the database secret, first create the ceh path with the following command:
 
