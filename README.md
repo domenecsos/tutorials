@@ -43,8 +43,8 @@ La prueba piloto se divide en dos grandes áreas:
 La infraestructura a instalar es:
 
 - [Helm y Go](10-helm-go.md) como prerrequisitos para poder instalar ArgoCD.
-- [ArgoCD](11-argocd.md) como Custom Resource Definition (CRD) lo que facilita la configuración respecto al Operador ofrecido por OpenShift, más estricto a la hora de hacer cambios.
-- [Vault](12-vault.md) como sistema externo que gestionará los secretos.
+- [Vault](11-vault.md) como sistema externo que gestionará los secretos.
+- [ArgoCD](12-argocd.md) como Custom Resource Definition (CRD) lo que facilita la configuración respecto al Operador ofrecido por OpenShift, más estricto a la hora de hacer cambios.
 
 
 ### Configuración y prueba
