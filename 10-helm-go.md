@@ -17,8 +17,9 @@ instalamos la versión 1.20.5 Go `go1.20.5.windows-amd64.msi` desde [https://go.
 
 Validamos la accesibilidad de Go:
 ```
->go version
-go version go1.20.5 windows/amd64
+go version
+	
+	go version go1.20.5 windows/amd64
 ```
 
 Hemos instalado Go 1.20.5 > 1.13.
@@ -44,6 +45,7 @@ Tomamos de forma genérica la página de instalación de Helm propiamente dicha 
 Dado que se disponía de **Chocolatey**,se hizo la instalación con esta herramienta y como administrador local.
 ```
 choco install kubernetes-helm
+	
 	Chocolatey v1.3.0
 	Installing the following packages:
 	kubernetes-helm
