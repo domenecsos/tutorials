@@ -45,7 +45,7 @@ La infraestructura a instalar es:
 - [Helm y Go](10-helm-go.md) como prerrequisitos para poder instalar ArgoCD.
 - [Vault](11-vault.md) como sistema externo que gestionará los secretos.
 - [ArgoCD](12-argocd.md) como Custom Resource Definition (CRD) lo que facilita la configuración respecto al Operador ofrecido por OpenShift, más estricto a la hora de hacer cambios.
-- [ArgoCD Vault Plugin (AVP)](20-avp.md) como lazo final. Información adicional en [Notas sobre AVP](21-avp-notas.md)
+- [ArgoCD Vault Plugin (AVP)](20-avp.md) como lazo final.
 
 ### Configuración y prueba
 
