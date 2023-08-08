@@ -129,3 +129,11 @@ Ejemplo de login via API. `-k`para evitar el error de TLS.
 ARGOCD_SERVER=https://myargocd-server-myargocd.apps.k8spro.nextret.net
 curl -k $ARGOCD_SERVER/api/v1/session -d $'{"username":"admin","password":"5Jm...Tq8"}'
 ```
+
+## TODO ArgoCD en cualquier namespace
+
+La instalación personalizada es capaz de desplegar solo en su propio namespace. 
+
+Para desplegar en un conjunto de namespaces (restringido por seguridad) se sigue esta guía.
+
+- [https://argo-cd.readthedocs.io/en/stable/operator-manual/app-any-namespace/](https://argo-cd.readthedocs.io/en/stable/operator-manual/app-any-namespace/)
