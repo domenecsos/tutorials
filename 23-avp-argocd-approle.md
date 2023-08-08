@@ -1,0 +1,1 @@
+# Despliegue de aplicaciones en ArgoCD con Vault approle
