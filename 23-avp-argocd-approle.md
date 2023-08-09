@@ -233,6 +233,9 @@ Y a partir de aquí crear una aplicación tal como indica el tutorial de referen
 
 > If so, you have successfully used the argocd-vault-plugin! We can confirm this by looking for the secret in Kubernetes and checking its value:
 
+El tutorial sugiere aquí refrescar el valor en Vault y volver a sincronizarlo.
+Para el refresco con el hard refresh ver la siguiente sección **Sincronización**
+
 > However we are not done yet! One of the great things about the plugin is that if the value changes in Vault we can update the value in the cluster with little effort. So update the value in vault:
 
 ```
@@ -244,3 +247,250 @@ vault kv put avp/test sample=new_secret
 > Now you should notice that is application is out of sync:
 
 > This means that the plugin performed the dry run and determined that the output was different than what was currently in the cluster. Now all we have to do is sync the application and we should see the application back green!
+
+## Despliegue en otros namespaces
+
+A efectos de un despliegue en ArgoCD hay que contar con un conjunto de ámbitos:
+
+- El **clúster**, que en esta prueba de concepto se restringe al clúster local.
+- El **proyecto ArgoCD**, que es una entidad que tiene sentido en el ámito de ArgoCD.
+- El **namespace** o **project** de **OpenShift**. 
+  Es la entidad que agrupa recursos de forma lógica en OpenShift.
+  Hay que tener cuidado de no confundirlo con el proyecto de ArgoCD.
+
+Con una instancia de ArgoCD fresca y sin más configuración 
+hay una limitación importante: _Sólo se puede desplegar al propio namespace de ArgoCD_. En esta prueba de concepto, `myargocd`.
+Si al crear una app de ArgoCD se le da como destino un namespace sin preparar nada, tendremos el error:
+```
+ComparisonError
+Namespace "mynamespace" 
+for Secret "example-secret" 
+is not managed
+```
+
+En [https://access.redhat.com/solutions/6158462](https://access.redhat.com/solutions/6158462) 
+se proponen dos soluciones en función de la granularidad que se quiera dar del control sobre el namespace destino.
+
+### Control total del namespace destino
+
+Esta solución consiste en crear (borrar si ya existe) 
+el namespace de forma que sea gestionado por ArgoCD.
+Esto implica que ArgoCD puede hacer cualquier cosa en el namespace.
+
+```
+cat << EOF >> nstest.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mynamespace
+  labels:
+    argocd.argoproj.io/managed-by: myargocd
+EOF
+
+oc apply -f nstest.yaml
+	namespace/mynamespace created
+```
+
+Elementos a sustituir en el manifiesto:
+- `name: mynamespace`: new namespace to be managed by an existing Argo CD instance.
+- `argocd.argoproj.io/managed-by: myargocd`: namespace where Argo CD is deployed.
+
+Con esto ha sido posible deplegar la aplicación al nuevo namespace manejado por ArgoCD.
+
+### Control parcial  del namespace destino
+
+Se deja aquí anotada la opción que da control a ArgoCD con una granularidad fina de permisos, ya que el artículo requiere una cuenta de RedHat para acceder a leerlo.
+
+> There are two options to grant permissions to ArgoCD 
+to manage different namespaces. First option applyes roles and rolebindings 
+and it is referenced in another solution (https://access.redhat.com/solutions/5875661). 
+This solutions adds more flexibility as the resources and verbs 
+that are granted can be defined.
+
+>It is needed to create a Role and a RoleBinding to give privileges to the new ArgoCD instance. This way, ArgoCD will be able to create resources in a different namespace.
+
+>The `role.yaml` should be similar to the one below, but it can be configured with different verbs depending on the user case:
+
+```
+$ cat << EOF >> role.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: <role-name>
+  namespace: <target-ns>
+rules:
+- apiGroups:
+  - "*"
+  resources:
+  - "*"
+  verbs:
+  - Get
+  - List
+  - Watch
+  - Patch
+EOF
+
+$ oc create -f  role.yaml
+```
+The RoleBinding should be similar to the following:
+
+```
+$ cat << EOF >> rolebinding.yaml
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: RoleBinding
+metadata:
+  name: <role-binding-name>
+  namespace: <target-ns>
+roleRef:
+  apiGroup: rbac.authorization.k8s.io  
+  kind: Role
+  name: <role-name>
+subjects:
+- kind: ServiceAccount
+  name: <application-controller-name> 
+  namespace: <application-controller-namespace> 
+EOF
+
+oc create -f  rolebinding.yaml
+```
+Valores a sustituir:
+- `role-binding-name`: Nombre a voluntad para el role binding.
+- `role-name`: Nombre a voluntad para el role.
+- `target-ns`: El namespace a controlar ya creado.
+- `application-controller-name`: Suponemos para la prueba de concepto el `myargocd-application-controller`. 
+- `application-controller-namespace`: Suponemos para la prueba de concepto el `myargocd`. 
+
+
+> After creating the Role and RoleBindig, the sync process should finish successfully.
+
+No lo hace pero por la necesidad ya indicada del tutorial de hacer un hard refresh para el caso de los secretos.
+
+## Creación de objetos para desplegar una app en ArgoCD
+
+Se ha visto como es necesario crear el namespace destino de forma que sea controlado por ArgoCD para poder desplegar.
+
+Del mismo modo, el proyecto de ArgoCD también tiene algunas sutilidades. Veamos un modo conveniente de crearlos. 
+Los objetos creados de forma conveniente tienen una ventaja: Aparecen en los desplegables de la página de creación de una app en la UI de ArgoCD.
+
+### Creación del proyecto
+
+El proyecto se puede crear sin más en la UI de ArgoCD.
+
+### Registrar el repositorio git
+
+Para repositorios públicos esto no es necesario, pero para repos privados protegidos con una clave privada lo siguiente es necesario. Y de paso y como se ha dicho, aparece en el desplegable de repositorios.
+
+Se recomienda tener un mínimo de repositorios de configuración de ArgoCD y luego usar el path relativo a la raíz. En la prueba de concepto se han usado repos específicos con `.` como path para usarlos directamente en su raíz.
+
+De otro proyecto en otra entidad tomamos este ejemplo.
+
+La autenticación se hace por una clave privada que tendremos en un fichero de texto llamado en este ejemplo `id_rsa` 
+```
+-----BEGIN RSA PRIVATE KEY----- 
+MIIEowIBAAKCAQE(…)
+(…)OZmfh6DQ3D6pTGDPwxFFhX5sLrwshSgu11bW9
+-----END RSA PRIVATE KEY-----
+```
+Se añade el URL de git repo el proyecto.
+```
+argocd repo add \
+  git@gitlab.irtve.rtve.int:kubernetes/rtve-app-pf-play.git
+	
+	Repository 'git@gitlab.irtve.rtve.int:kubernetes/rtve-app-pf-play.git' added
+```
+Si el repositorio es privado y no se registra debidamente en ArgoCD, cuando se cree la aplicación se obtendrá un error como el siguiente:
+```
+Unable to create application: application spec for pf-news is invalid: 
+InvalidSpecError: application repo git@gitlab.irtve.rtve.int:kubernetes/rtve-app-pf-news.git is not permitted in project 'rtve-pro'
+```
+
+### Permisos en el namespace destino
+Esta es una solución alternativa a las vistas anteriormente, que funcionó con el `gitops-operator`, no en una instancia personalizada.
+
+Para que un proyecto de ArgoCD pueda desplegar en un namespace de Openshift es necesario ejecutar el comando `argocd proj add-destination <PROJECT> <CLUSTER>,<NAMESPACE>`, que permite que el namespace de Openshift sea destino de las aplicaciones en el proyecto ArgoCD. Esta operación es necesaria una sola vez para todas las aplicaciones en ese proyecto.
+```
+argocd proj add-destination \
+	rtve-pro \
+	https://kubernetes.default.svc \
+	rtve-pf
+```
+Si no se ha permitido que el proyecto ArgoCD despliegue en el namespace de OpenShift, cuando se cree la aplicación se obtendrá un error como el siguiente:
+```
+Unable to create application: application spec for pf-news is invalid: 
+InvalidSpecError: application destination {https://kubernetes.default.svc rtve-pf} is not permitted in project 'rtve-pro'
+```
+Para disponer de los permisos de creación de aplicaciones en un namespace de OpenShift se eleva (previamente) el serviceaccount de ArgoCD a admin en Openshift.
+```
+>oc adm policy add-role-to-user admin system:serviceaccount:openshift-gitops:openshift-gitops-argocd-application-controller -n rtve-pf
+```
+La falta de esta elevación podría haber dado lugar a un mensaje como este
+```
+Unable to create application: permission denied: applications, create, rtve-pro/pf-news, sub: CiRhMzk4NDliZC05ZWQxLTRlMWUtYTdiMi1kOTcyOWRlMDEwNmYSCW9wZW5zaGlmdA, iat: 2022-12-14T08:50:39Z
+```
+
+## Refresco y deprecación del AVP
+
+El tutorial seguido habla de la necesidad de hacer un hard refresh y luego sincronizar.
+El hard refresh es una subopción disponible en el botón del refresh de la UI,
+y también se puede hacer desde línea de comandos. 
+Después del hard refresh, por el método que sea, el sync de la aplicación ArgoCD trae los nuevos valores del Vault.
+
+La explicación plausible es que el secreto fuente en ArgoCD no cambia, tiene la misma marca de sustitución.
+Al hacer el hard refresh se hace un _dry run_ en el que ArgoCD ve que la salida del plugin es distinta de lo que tiene,
+y es en ese momento cuando ArgoCD considera que está `OutOfSync` y ejecutará el siguiente sync realmente.
+```
+argocd app get sample-secrets-mynamespace --hard-refresh
+	time="2023-08-09T11:03:35+02:00" level=warning msg="spec.plugin.name is set, which means this Application uses a plugin installed in the argocd-cm ConfigMap. Installing plugins via that ConfigMap is deprecated in Argo CD v2.5. Starting in Argo CD v2.6, this Application will fail to sync. Contact your Argo CD admin to make sure an upgrade plan is in place. More info: https://argo-cd.readthedocs.io/en/latest/operator-manual/upgrading/2.4-2.5/"
+	Name:               myargocd/sample-secrets-mynamespace
+	Project:            myargocdproject
+	Server:             https://kubernetes.default.svc
+	Namespace:          mynamespace
+	URL:                https://myargocd-server-myargocd.apps.k8spro.nextret.net/applications/sample-secrets-mynamespace
+	Repo:               https://github.com/werne2j/arogcd-vault-plugin-demo.git
+	Target:             HEAD
+	Path:               .
+	SyncWindow:         Sync Allowed
+	Sync Policy:        <none>
+	Sync Status:        OutOfSync from HEAD (b7cec5a)
+	Health Status:      Healthy
+
+	GROUP  KIND    NAMESPACE    NAME            STATUS     HEALTH  HOOK  MESSAGE
+		   Secret  mynamespace  example-secret  OutOfSync                secret/example-secret configured
+
+oc extract secret/example-secret -n mynamespace --to=-
+	# sample-secret
+	valor nuevo
+```
+Recordatorio:
+```
+oc extract secret/myargocd-cluster -n myargocd --to=-
+argocd login myargocd-server-myargocd.apps.k8spro.nextret.net
+```
+Respecto al mensaje que aparece en el hard refresh:
+```
+	level=warning 
+	msg="spec.plugin.name is set, which means this Application 
+	uses a plugin installed in the argocd-cm ConfigMap. 
+	Installing plugins via that ConfigMap is deprecated in Argo CD v2.5. 
+	Starting in Argo CD v2.6, this Application will fail to sync. 
+	Contact your Argo CD admin to make sure an upgrade plan is in place. More info: https://argo-cd.readthedocs.io/en/latest/operator-manual/upgrading/2.4-2.5/"
+```
+De hecho estar, ya estamos en ArgoCD 2.6 sever y no ha fallado...
+```
+argocd version
+	argocd: v2.5.3+0c7de21
+	  BuildDate: 2022-11-28T17:22:28Z
+	  GitCommit: 0c7de210ae66bf631cc4f27ee1b5cdc0d04c1c96
+	  GitTreeState: clean
+	  GoVersion: go1.18.8
+	  Compiler: gc
+	  Platform: windows/amd64
+>>	argocd-server: v2.6.7+unknown
+```
+En cualquier caso, no es nuevo el tema de deprecar la configuración 
+del plugin AVP con el `argocd-cm` configMap y sería bueno 
+plantear el uso de contenedores sidecar para este cometido.
+
+- https://github.com/argoproj/argo-cd/issues/11689
+	- https://argo-cd.readthedocs.io/en/stable/user-guide/config-management-plugins/
+		- https://argo-cd.readthedocs.io/en/stable/operator-manual/config-management-plugins/
