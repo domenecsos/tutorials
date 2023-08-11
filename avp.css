@@ -4,16 +4,32 @@ p {
 
 blockquote p {
 	font-style: italic;
+    border-left: 5px solid #DDD;
+    padding-left: 10px ;
+}
+
+h1 {
+  font-family: "arial";
+}
+
+h2 {
+  font-family: "arial";
+}
+
+h3 {
+  font-family: "arial";
+}
+
+h4 {
+  font-family: "arial";
+}
+
+h5 {
+  font-family: "arial";
 }
 
 li {
   font-family: "arial";
-}
-
-pre code {
-  font-family: "courier new";
-  color: crimson;
-  background-color: #f1f1f1;
 }
 
 code {
@@ -22,3 +38,23 @@ code {
   padding: 2px;
   font-family: "courier new";
 }
+
+.codigo {
+  background-color: black;
+  padding: 10px;
+  margin-left: 20px;
+
+}
+
+pre code {
+  font-family: "courier new";
+  color: white;
+  background-color: #080808;
+
+    white-space: -moz-pre-wrap; /* Mozilla, supported since 1999 */
+    white-space: -pre-wrap; /* Opera */
+    white-space: -o-pre-wrap; /* Opera */
+    white-space: pre-wrap; /* CSS3 - Text module (Candidate Recommendation) http://www.w3.org/TR/css3-text/#white-space */
+    word-wrap: break-word; /* IE 5.5+ */  
+}
+
