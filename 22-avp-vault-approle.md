@@ -18,6 +18,12 @@ Similar, pero para authn por kubernetes (service account y RBAC)
 
 - https://cloud.redhat.com/blog/how-to-use-hashicorp-vault-and-argo-cd-for-gitops-on-openshift
 
+La última versión de todo es el Vault Agent, con inyección de secretos, mutating webhooks y otras exquisiteces de implementación no trivial.
+
+- https://cloud.redhat.com/blog/integrating-hashicorp-vault-in-openshift-4
+- https://developer.hashicorp.com/vault/docs/platform/k8s/injector
+- https://developer.hashicorp.com/vault/tutorials/kubernetes/kubernetes-sidecar
+
 ## Ejecucion tutorial
 
 Se sigue el tutorial de la lista anterior:
@@ -93,6 +99,7 @@ path "secret/data/mysql/webapp" {
 Ahora si, aplicar la definición anterior de policy que permite leer el secreto en el path de sus datos (incluye `/data/`).
 
 >Before creating a role, create a jenkins policy.
+
 ```
 vault policy write jenkins -<<EOF
 # Read-only permission on secrets stored at 'secret/data/mysql/webapp'
@@ -105,6 +112,7 @@ EOF
 ```
 
 #### Creación del role con la policy anterior
+
 >Creates a role named jenkins with jenkins policy attached. The generated token's time-to-live (TTL) is set to 1 hour and can be renewed for up to 4 hours of its first creation. (NOTE: This example creates a role which operates in pull mode.)
 
 Interesa el `token_policies` que relaciona con la política de lectura anterior.
@@ -117,6 +125,7 @@ vault write auth/approle/role/jenkins \
 	Success! Data written to: auth/approle/role/jenkins
 ```
 > Read the jenkins role you created to verify.
+
 ```
 vault read auth/approle/role/jenkins
 
@@ -129,6 +138,7 @@ vault read auth/approle/role/jenkins
 ```
 
 ### Obtención de RoleID y SecretID
+
 >Step 3: Get RoleID and SecretID
 
 >The RoleID and SecretID are like a username and password that a machine or app uses to authenticate.
@@ -157,6 +167,7 @@ En las operaciones de autenticación este sería la password.
 Importante notar que tiene una validez máxima de 30 días y que se debe hacer una renovación periódica por política de seguridad.
 
 >Execute the following command to generate a SecretID for the jenkins role.
+
 ```
 vault write -force auth/approle/role/jenkins/secret-id
 	Key                   Value
@@ -179,6 +190,7 @@ If you specified secret_id_ttl, secret_id_num_uses, or bound_cidr_list on the ro
 
 >To login, use the auth/approle/login endpoint by passing the RoleID and SecretID.
 Example:
+
 ```
 vault write auth/approle/login \
 	role_id="9fa0a37a-d130-0b6c-8b30-a18fb203dc10" \
@@ -195,13 +207,17 @@ vault write auth/approle/login \
 		policies                ["default" "jenkins"]
 		token_meta_role_name    jenkins
 ```
+
 >Vault returns a client token with default and jenkins policies attached.
 Store the generated token value in an environment variable named, APP_TOKEN.
 Example:
+
 ```
 export APP_TOKEN="hvs.CAESIIulXqsaZSsGj1DwRPeEp-g2Ssq1qa3OA04wPQp9LVLIGh4KHGh2cy50QXVTSUJIMzcxRDVEbHl1MEpGSElDdVM"
 ```
+
 #### Leer secreto con el token devuelto por el login
+
 >Step 5: Read secrets using the AppRole token
 (Persona: app)
 

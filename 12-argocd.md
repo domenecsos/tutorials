@@ -99,11 +99,14 @@ El cliente de ArgoCD de línea de comandos puede ser de utilidad a futuro.
 
 >- Download the latest Argo CD binary file from https://github.com/argoproj/argo-cd/releases/latest.
 >- If you are using Linux, download the CLI and add it to your path:
+
 ```
 $ sudo curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
 $ sudo chmod +x /usr/local/bin/argocd
 ```
+
 >If everything went well, you will see the following output by running the argocd version command. Ignore the error message you see in the last line; it is an expected message as we haven’t logged in to any OpenShift cluster yet:
+
 ```
 argocd version
 
@@ -130,10 +133,12 @@ ARGOCD_SERVER=https://myargocd-server-myargocd.apps.k8spro.nextret.net
 curl -k $ARGOCD_SERVER/api/v1/session -d $'{"username":"admin","password":"5Jm...Tq8"}'
 ```
 
-## TODO ArgoCD en cualquier namespace
+## ArgoCD en cualquier namespace
 
 La instalación personalizada es capaz de desplegar solo en su propio namespace. 
 
-Para desplegar en un conjunto de namespaces (restringido por seguridad) se sigue esta guía.
+Para desplegar en un conjunto de namespaces (restringido por seguridad) se debería seguir esta guía.
 
 - [https://argo-cd.readthedocs.io/en/stable/operator-manual/app-any-namespace/](https://argo-cd.readthedocs.io/en/stable/operator-manual/app-any-namespace/)
+
+No obstante, en otro punto de este documento se detalla como crear el namespace ya manejado por el namespace de la instancia de ArgoCD, sin más complicación.

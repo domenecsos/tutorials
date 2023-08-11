@@ -1,0 +1,24 @@
+p {
+  font-family: "arial";
+}
+
+blockquote p {
+	font-style: italic;
+}
+
+li {
+  font-family: "arial";
+}
+
+pre code {
+  font-family: "courier new";
+  color: crimson;
+  background-color: #f1f1f1;
+}
+
+code {
+  color: #444;
+  background-color: #f1f1f1;
+  padding: 2px;
+  font-family: "courier new";
+}

@@ -62,3 +62,9 @@ Una vez configurado authn y authz, el sistema externo puede interpretar el `path
 
 El último paso es [crear una aplicación en ArgoCD](40-app.md) y ver como efectivamente se hace la sustitución.
 
+### CyberArk
+
+De momento no se considera en vistas de los requerimientos expresados:
+
+- https://docs.cyberark.com/AAM-DAP/12.4/en/Content/Integrations/k8s-ocp/k8s_lp.htm
+

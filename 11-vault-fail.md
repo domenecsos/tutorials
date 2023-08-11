@@ -38,6 +38,7 @@ Fuente: [https://docs.openshift.com/container-platform/4.10/applications/working
 Procedimiento
 
 > Create a new project:
+
 ```
 $ oc new-project vault
 	Now using project "vault" on server "https://api.k8spro.nextret.net:6443".
@@ -48,11 +49,14 @@ $ oc new-project vault
 ```
 
 >Add a repository of Helm charts to your local Helm client:
+
 ```
 $ helm repo add openshift-helm-charts https://charts.openshift.io/
 	"openshift-helm-charts" has been added to your repositories
 ```
+
 > Update the repository:
+
 ```
 $ helm repo update
 	Hang tight while we grab the latest from your chart repositories...
@@ -61,6 +65,7 @@ $ helm repo update
 ```
 
 > Install an example HashiCorp Vault:
+
 ```
 $ helm install example-vault openshift-helm-charts/hashicorp-vault
 	NAME: example-vault

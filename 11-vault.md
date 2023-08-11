@@ -16,12 +16,14 @@ Cuidado: Esta referencia está bien para instalar Vault, pero luego usa el méto
 ### Crear un namespace para todo lo Vault
 
 > First, create a namespace in OCP called vault-infra using the following command:
+
 ```
 oc create namespace vault-infra
 	namespace/vault-infra created
 ```
 
 >This namespace will be the home for Vault in your OCP environment. Confirm that the new namespace is created with the following command:
+
 ```
 oc get namespaces | grep vault-infra
 	vault-infra                                        Active   89s
@@ -30,6 +32,7 @@ oc get namespaces | grep vault-infra
 ### Clonar localmente el Helm chart de Vault
 
 > Clone the vault-helm GitHub repository into your local filesystem (using the command below). This step makes it much easier to keep track of the configuration changes you make to the Vault helm chart before you install it.
+
 ```
 git clone https://github.com/hashicorp/vault-helm.git
 	Cloning into 'vault-helm'...
@@ -112,6 +115,7 @@ Your release is named vault. To learn more about the release, try:
 Tal cual acaba de arrancar, el pod vault-0 del `statefulset` no está ready por estar pendiente del unsealing.
 
 > You can then run the following command to check the status of your Vault deployment:
+
 ```
 oc get pods -n vault-infra
 	NAME                                    READY   STATUS    RESTARTS   AGE
@@ -178,6 +182,7 @@ chmod a+w  /vault/data
 Corregido el error y con el comando de inicialización salen
 - Las 5 claves de unseal, con 3 de las cuales podremos hacer unseal ya que son el quorum necesario.
 - El root token que servirá para hacer login en un Vault *unsealed*.
+
 ```
 vault operator init
 	Unseal Key 1: TBf03DweOoMQ3A3EvxqS/wX4kZb1JV3IQOQAkNK79v7c
@@ -226,6 +231,7 @@ vault operator unseal 7lSvenOE5mDq3O1xJlBqs5q4FrHJDpxT9Uri3m7FW+lH
 vault operator unseal f6HwDGcyMcvbXKOJMbaPQS9TjuxiOySeR/YIHSGxZLli
 	Sealed             false
 ```
+
 > Success, Vault is now initialized and unsealed! I checked my running pods and found that the vault-0 pod changed to a Ready: 1/1 state.
 
 Una vez inicializado, el pod se manifiesta como arrancado.

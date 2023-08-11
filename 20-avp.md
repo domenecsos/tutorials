@@ -39,6 +39,7 @@ El resto de esta página contiene la parte descriptiva del artículo.
 >The argocd-vault-plugin is a custom ArgoCD plugin for retrieving secrets from HashiCorp Vault and injecting them into Kubernetes YAML files. Within ArgoCD, there is a way to integrate custom plugins if you need something outside of the supported tools that are built-in and we wanted to take advantage of this pattern. One of the ideas behind this plugin was to write it in a way that did not require an Operator or Custom Resource. This allows us to be able to parameterize any Kubernetes resources, even Custom Resources, not just Secrets.
 >
 >The plugin works by first retrieving values from Vault based on a path that can be specified as an Environment Variable or an Annotation inside of the YAML file and then injects the values into a templated out yaml, that uses <> as the template markers. For example:
+
 ```
 kind: Secret
 apiVersion: v1
@@ -65,4 +66,5 @@ type: Opaque
 stringData:
   password: some-password # From the key password-vault-key in Vault
 ```
+
 >You can view all the supported backends and authentication types here, [https://argocd-vault-plugin.readthedocs.io/en/stable/backends/](https://argocd-vault-plugin.readthedocs.io/en/stable/backends/).

@@ -234,3 +234,4 @@ los Config Management Plugins (CMP) que usan configmap argocd-cm
 en favor del uso de sidecars (contenedores a los que se les manda un tarball con los manifiestos manejados y que devuelven otro tarball).
 - [https://github.com/argoproj/argo-cd/issues/8117](https://github.com/argoproj/argo-cd/issues/8117)
 - [https://argo-cd.readthedocs.io/en/stable/operator-manual/config-management-plugins/](https://argo-cd.readthedocs.io/en/stable/operator-manual/config-management-plugins/)
+
