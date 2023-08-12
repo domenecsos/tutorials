@@ -96,29 +96,29 @@ markdown.render(allMd, opts, function(err) {
 		console.error('>>>' + err);
 		process.exit();
 	}
-  
-	// Dump final
+	
+		// Dump final
 	if ( htmlOutputFile ) {
-		markdown.pipe(fs.createWriteStream(htmlOutputFile));
-		beautifyHTML(htmlOutputFile);
+		var tempFile = htmlOutputFile+".tmp";
+		var stream = fs.createWriteStream(tempFile);
+		markdown.pipe(stream);
+		stream.on('finish', () => {
+			beautifyHTML(tempFile,htmlOutputFile);
+			fs.unlinkSync(tempFile);
+        });
 	} else {
 		markdown.pipe(process.stdout);
 	}
+
 });
 
-function beautifyHTML(file) {
+function beautifyHTML(temp,file) {
 	
-	var html = fs.readFileSync(file, 'utf8');
+	var html = fs.readFileSync(temp, 'utf8');
 
 	var html = html.replace('<head>', '<head><meta charset="utf-8">');
 	html = html.replaceAll('<pre><code>', '<div class="codigo"><pre><code>');
 	html = html.replaceAll('</code></pre>', '</code></pre></div>');
 
-	fs.writeFile("avp2.html", html, function(){});
+	fs.writeFile(file, html, function(){});
 }
-
-/* TODO
-Pipejar markdown a un string, beautify it i llavors si gravar o mostrar pantalla
-Provar si Word agafa imatges.
-Modificar els links interns, i mirar si arriben a un PDF.
-*/
