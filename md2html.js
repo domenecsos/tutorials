@@ -56,17 +56,28 @@ var css = argv.css;
 // -------------------------------------------------------
 
 // Buffer para acumular los md.
-var md='';
+var md="@@title@@\n\n@@ToC@@\n\n";
+var toc = [];
+
+const twoNl="\n\n";
+const anchorStart="@1@(";
+const anchorFinish=")@1@";
 
 // Iterar y acumular los md
 for ( var i=0; i<mds.length; i++ ) {
 
 	// Completar última linea si no tiene \n final y separar nuevo contenido con linea(s) en blanco
 	if ( i>0 ) 
-		md= md+"\n\n"; 
+		md= md+twoNl; 
+	
+	md= md+ anchorStart+file2anchor(mds[i])+anchorFinish+twoNl;
 
 	// Lectura del markdown sincrona, ZFFGT que sea sincrona
-	md= md+fs.readFileSync(mds[i], 'utf8');
+	var txt=fs.readFileSync(mds[i], 'utf8');
+	md= md+txt;
+
+	var t = txt.match(/^# .*$/gm);
+	toc.push( t.length<1? mds[i]: t[0].substring(2) );
 }
 
 fs.writeFile(allMd, md, function(){});
@@ -120,5 +131,30 @@ function beautifyHTML(temp,file) {
 	html = html.replaceAll('<pre><code>', '<div class="codigo"><pre><code>');
 	html = html.replaceAll('</code></pre>', '</code></pre></div>');
 
+	html = html.replaceAll(anchorStart,'<a name="').replaceAll(anchorFinish,'" />');
+	
+	for ( var i=0; i<mds.length; i++ ) {
+		html = html.replaceAll(' href="'+mds[i]+'"',' href="#'+file2anchor(mds[i])+'"');
+	}
+	
+	html = html.replaceAll("@@title@@", '<h1>'+title+'</h1>');
+
+	html = html.replaceAll("@@ToC@@", getToC());
+
 	fs.writeFile(file, html, function(){});
+}
+
+function file2anchor(file) {
+	return file.replaceAll('.','_').replaceAll('/','_').replaceAll('-','_');
+}
+
+function getToC() {
+	
+	var t='<ul>';
+
+	for ( var i=0; i<mds.length; i++ ) {
+		t=t+'<li><a href="#'+file2anchor(mds[i])+'">'+toc[i]+'</a>.</li>'+"\n";
+	}	
+	
+	return t+"</ul>\n";
 }
