@@ -1,5 +1,8 @@
 # Prueba de concepto de instalación de ArgoCD Vault Plugin (AVP)
 
+![Vault logo](img/vault-logo.jpg)
+![ArgoCD logo](img/argocd.jpg)
+
 ## Resumen de ArgoCD Vault Plugin (AVP)
 
 ArgoCD Vault Plugin (AVP) es un ejecutable de Linux que ArgoCD invoca antes 
