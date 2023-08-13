@@ -1,0 +1,1436 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8">
+  <title>Prueba de concepto de ArgoCD Vault Plugin (AVP)</title>
+  <link rel="stylesheet" href="avp.css">
+</head>
+<body>
+<p><h1>Prueba de concepto de ArgoCD Vault Plugin (AVP)</h1></p>
+<p><ul><li><a href="#README_md">Prueba de concepto de instalación de ArgoCD Vault Plugin (AVP)</a>.</li>
+<li><a href="#10_helm_go_md">Helm y Go </a>.</li>
+<li><a href="#11_vault_fail_md">Instalación de Vault según la documentación de OpenShift</a>.</li>
+<li><a href="#11_vault_md">Instalación de Vault</a>.</li>
+<li><a href="#12_argocd_md">Instalación de ArgoCD</a>.</li>
+<li><a href="#20_avp_md">ArgoCD Vault Plugin (AVP)</a>.</li>
+<li><a href="#21_avp_install_md">Instalación de ArgoCD Vault Plugin (AVP)</a>.</li>
+<li><a href="#22_avp_vault_approle_md">Autenticación y autorización por approle en Vault</a>.</li>
+<li><a href="#23_avp_argocd_approle_md">Despliegue de aplicaciones en ArgoCD con Vault approle</a>.</li>
+</ul>
+</p>
+<p><a name="README_md" /></p>
+<h1 id="prueba-de-concepto-de-instalaci-n-de-argocd-vault-plugin-avp-">Prueba de concepto de instalación de ArgoCD Vault Plugin (AVP)</h1>
+<p><img src="img/vault-logo.jpg" alt="Vault logo"><br><img src="img/argocd.jpg" alt="ArgoCD logo"></p>
+<h2 id="resumen-de-argocd-vault-plugin-avp-">Resumen de ArgoCD Vault Plugin (AVP)</h2>
+<p>ArgoCD Vault Plugin (AVP) es un ejecutable de Linux que ArgoCD invoca antes<br>de desplegar un manifiesto de un objeto en OpenShift<br>para sustituir en el manifiesto unas marcas especiales<br>por valores secretos almacenados en un sistema de gestión de secretos.</p>
+<p>Típicamente este manifiesto a modificar será el de un <code>Secret</code> (también un <code>ConfigMap</code>) con este aspecto:</p>
+<div class="codigo"><pre><code>kind: Secret
+apiVersion: v1
+metadata:
+  name: example-secret
+  annotations:
+    avp.kubernetes.io/path: &quot;avp/data/test&quot;
+type: Opaque
+stringData:
+  sample-secret: &lt;sample&gt;
+</code></pre></div><p>La anotación <code>avp.kubernetes.io/path:</code> indica que el manifiesto está sujeto a ser modificado por ArgoCD Vault Plugin (AVP)<br>con los valores que un sistema externo almacena en un path interno de ese sistema <code>&quot;avp/data/test&quot;</code>.</p>
+<p>El sentido del path en ese sistema depende del sistema que se configure, y aplica por igual a todos los manifiestos que esa instancia de ArgoCD maneje con AVP.</p>
+<p>En última instancia, en esta prueba de concepto se consigue que el código fuente de la aplicación no tenga almacenado ningún secreto.</p>
+<p>El aspecto a mejorar, es que una vez desplegado es secreto este queda visible para los administradores de cluster y parar los administradores del namespace donde reside.<br>Ésto último se puede mejorar al coste de una mayor complicación.</p>
+<h2 id="objetivo-de-esta-prueba-piloto">Objetivo de esta prueba piloto</h2>
+<p>La prueba piloto se divide en dos grandes áreas:</p>
+<ul>
+<li>Instalación de una infraestructura en OpenShift que facilite la prueba piloto en si.</li>
+<li>Las operaciones de configuración de la prueba piloto que permiten desplegar una aplicación con un Secret donde AVP pondrá el valor de un secreto externo en la marca prevista.</li>
+</ul>
+<h3 id="infraestructura">Infraestructura</h3>
+<p>La infraestructura a instalar es:</p>
+<ul>
+<li><a href="#10_helm_go_md">Helm y Go</a> como prerrequisitos para poder instalar ArgoCD.</li>
+<li><a href="#11_vault_md">Vault</a> como sistema externo que gestionará los secretos.</li>
+<li><a href="#12_argocd_md">ArgoCD</a> como Custom Resource Definition (CRD) lo que facilita la configuración respecto al Operador ofrecido por OpenShift, más estricto a la hora de hacer cambios.</li>
+<li><a href="#20_avp_md">ArgoCD Vault Plugin (AVP)</a> como lazo final.</li>
+</ul>
+<h3 id="configuraci-n-y-prueba">Configuración y prueba</h3>
+<p>La configuración más compleja es definir como el ArgoCD Vault Plugin (AVP) es capaz de presentarse<br>ante el sistema externo, demostrar su identidad (autenticación/authn) y a partir de estar lograr acceso para leer (autorización/authz) el valor que ha de escribir en la marca del manifiesto que ha de modificar antes de su despliegue.</p>
+<p>Para authn y authz del AVP hay dos opciones consideradas en esta prueba, se optó por la primera.</p>
+<ul>
+<li><a href="30-approle.md">Approle de Vault</a>, en que se usan &quot;cuentas&quot; definidas en Vault, los <code>role_id</code> y el equivalente de sus constraseñas, los <code>secret_id</code>.</li>
+<li><a href="31-sa-rbac.md">Service account de Openshift</a>, en que se usan las cuentas de servicio de Openshift y la autorización RBAC (Orle Based Access Control) de OpenShift.</li>
+</ul>
+<p>Una vez configurado authn y authz, el sistema externo puede interpretar el <code>path</code><br>(o valor dado en la anotación para que AVP actúe) y permitir que AVP consulte el secreto para hacer la sustitución en el manifiesto.</p>
+<p>El último paso es <a href="40-app.md">crear una aplicación en ArgoCD</a> y ver como efectivamente se hace la sustitución.</p>
+<h3 id="cyberark">CyberArk</h3>
+<p>De momento no se considera en vistas de los requerimientos expresados:</p>
+<ul>
+<li><a href="https://docs.cyberark.com/AAM-DAP/12.4/en/Content/Integrations/k8s-ocp/k8s_lp.htm">https://docs.cyberark.com/AAM-DAP/12.4/en/Content/Integrations/k8s-ocp/k8s_lp.htm</a></li>
+</ul>
+<p><a name="10_helm_go_md" /></p>
+<h1 id="helm-y-go">Helm y Go</h1>
+<p>Helm y Go son prerrequisitos para poder instalar ArgoCD.</p>
+<p>ArgoCD se instalará como Custom Resource Definition (CRD) lo que facilita la configuración respecto al Operador ofrecido por OpenShift, más estricto a la hora de hacer cambios.</p>
+<h2 id="go">Go</h2>
+<p>El siguiente documento &quot;Installing Helm&quot; indica los prerrequisitos y los pasos necesarios desde la propia consola OpenShift de la línea de comandos (CLI).</p>
+<p><a href="https://docs.openshift.com/container-platform/4.10/applications/working_with_helm_charts/installing-helm.html">https://docs.openshift.com/container-platform/4.10/applications/working_with_helm_charts/installing-helm.html</a></p>
+<blockquote>
+<p>Prerequisites: You have installed Go, version 1.13 or higher.</p>
+</blockquote>
+<p>En nuestro escritorio de preferencia, en este ejemplo Windows,<br>instalamos la versión 1.20.5 Go <code>go1.20.5.windows-amd64.msi</code> desde <a href="https://go.dev/doc/install">https://go.dev/doc/install</a></p>
+<p>Validamos la accesibilidad de Go:</p>
+<div class="codigo"><pre><code>go version
+
+    go version go1.20.5 windows/amd64
+</code></pre></div><p>Hemos instalado Go 1.20.5 &gt; 1.13.</p>
+<h2 id="helm">Helm</h2>
+<h3 id="instalar-helm-desde-p-ginas-de-red-hat">Instalar Helm desde páginas de Red Hat</h3>
+<p>El mismo documento &quot;Installing Helm&quot; indica los prerrequisitos y los pasos necesarios desde la propia consola OpenShift de la línea de comandos (CLI).</p>
+<p><a href="https://docs.openshift.com/container-platform/4.10/applications/working_with_helm_charts/installing-helm.html">https://docs.openshift.com/container-platform/4.10/applications/working_with_helm_charts/installing-helm.html</a></p>
+<blockquote>
+<p>You can also find the URL to the latest binaries from the OpenShift Container Platform web console by clicking the ? icon in the upper-right corner and selecting Command Line Tools.</p>
+</blockquote>
+<ul>
+<li><a href="https://console-openshift-console.apps.k8spro.nextret.net/command-line-tools">https://console-openshift-console.apps.k8spro.nextret.net/command-line-tools</a></li>
+<li><a href="https://mirror.openshift.com/pub/openshift-v4/clients/helm/latest">https://mirror.openshift.com/pub/openshift-v4/clients/helm/latest</a></li>
+</ul>
+<h3 id="instalaci-n-alternativa-desde-p-ginas-de-helm">Instalación alternativa desde páginas de Helm</h3>
+<p>En el momento de hacer la prueba no funciona <code>http://developers.redhat.com/</code> raíz de las decargas propuetas.<br>Tomamos de forma genérica la página de instalación de Helm propiamente dicha <a href="https://helm.sh/docs/intro/install/">https://helm.sh/docs/intro/install/</a> que sugiere usar la instalación comunitaria usando Chocolatey...</p>
+<p>Dado que se disponía de <strong>Chocolatey</strong>,se hizo la instalación con esta herramienta y como administrador local.</p>
+<div class="codigo"><pre><code>choco install kubernetes-helm
+
+    Chocolatey v1.3.0
+    Installing the following packages:
+    kubernetes-helm
+    By installing, you accept licenses for the packages.
+    Progress: Downloading kubernetes-helm 3.11.3... 100%
+
+    kubernetes-helm v3.11.3 [Approved]
+    kubernetes-helm package files install completed. Performing other installation steps.
+    The package kubernetes-helm wants to run &#39;chocolateyInstall.ps1&#39;.
+    Note: If you don&#39;t run this script, the installation will fail.
+    Note: To confirm automatically next time, use &#39;-y&#39; or consider:
+    choco feature enable -n allowGlobalConfirmation
+    Do you want to run the script?([Y]es/[A]ll - yes to all/[N]o/[P]rint): Y
+
+    Downloading kubernetes-helm 64 bit
+      from &#39;https://get.helm.sh/helm-v3.11.3-windows-amd64.zip&#39;
+    Progress: 100% - Completed download of C:\Users\Admin\AppData\Local\Temp\chocolatey\kubernetes-helm\3.11.3\helm-v3.11.3-windows-amd64.zip (14.91 MB).
+    Download of helm-v3.11.3-windows-amd64.zip (14.91 MB) completed.
+    Hashes match.
+    Extracting C:\Users\Admin\AppData\Local\Temp\chocolatey\kubernetes-helm\3.11.3\helm-v3.11.3-windows-amd64.zip to C:\ProgramData\chocolatey\lib\kubernetes-helm\tools...
+    C:\ProgramData\chocolatey\lib\kubernetes-helm\tools
+     ShimGen has successfully created a shim for helm.exe
+     The install of kubernetes-helm was successful.
+      Software installed to &#39;C:\ProgramData\chocolatey\lib\kubernetes-helm\tools&#39;
+
+    Chocolatey installed 1/1 packages.
+     See the log for details (C:\ProgramData\chocolatey\logs\chocolatey.log).
+
+    Did you know the proceeds of Pro (and some proceeds from other
+     licensed editions) go into bettering the community infrastructure?
+     Your support ensures an active community, keeps Chocolatey tip-top,
+     plus it nets you some awesome features!
+     https://chocolatey.org/compare
+</code></pre></div><p>Verificando</p>
+<div class="codigo"><pre><code>helm version
+
+    version.BuildInfo {
+        Version:&quot;v3.11.3&quot;, 
+        GitCommit:&quot;323249351482b3bbfc9f5004f65d400aa70f9ae7&quot;, 
+        GitTreeState:&quot;clean&quot;, 
+        GoVersion:&quot;go1.20.3&quot;
+    }
+</code></pre></div><p>Parece que Helm instaló su propio Go 1.20.3 (casi tan al dia como el 1.20.5 anterior, que ahora parece innecesario). La versión 3.11.3 es algo más actual que la 3.11.1 del mirror de Red Hat.</p>
+<p><a name="11_vault_fail_md" /></p>
+<h1 id="instalaci-n-de-vault-seg-n-la-documentaci-n-de-openshift">Instalación de Vault según la documentación de OpenShift</h1>
+<p>La instalación de Vault según la documentación de OpenShift presenta algunas restricciones tal como se ha seguido:</p>
+<ul>
+<li>No crea la ruta de acceso al servicio que accede a Vault.</li>
+<li>No parece haber instalado la interfaz gráfica de usuario.</li>
+</ul>
+<p>Por estos motivos se descarta, si bien interesa observar lo que ha instalado en <code>example-vault</code>.</p>
+<ul>
+<li>Persistent volume claim <code>data-example-vault-0</code>.</li>
+<li>Servicio <code>example-vault</code> que conecta por puerto 8200, pero sin rutas o ingress asociados.</li>
+<li>Replica set <code>example-vault-agent-injector</code>.</li>
+<li>Stateful set <code>example-vault</code>.</li>
+</ul>
+<h2 id="documentaci-n">Documentación</h2>
+<p>Para instalar Vault con Helm según OpenShift</p>
+<ul>
+<li><a href="https://docs.openshift.com/container-platform/4.10/applications/working_with_helm_charts/installing-helm.html">https://docs.openshift.com/container-platform/4.10/applications/working_with_helm_charts/installing-helm.html</a></li>
+<li><a href="https://docs.openshift.com/container-platform/4.10/applications/working_with_helm_charts/configuring-custom-helm-chart-repositories.html">https://docs.openshift.com/container-platform/4.10/applications/working_with_helm_charts/configuring-custom-helm-chart-repositories.html</a></li>
+</ul>
+<p>Complementario</p>
+<ul>
+<li><a href="https://developer.hashicorp.com/vault/docs/platform/k8s/helm/openshift">https://developer.hashicorp.com/vault/docs/platform/k8s/helm/openshift</a></li>
+<li><a href="https://cloud.redhat.com/blog/integrating-hashicorp-vault-in-openshift-4">https://cloud.redhat.com/blog/integrating-hashicorp-vault-in-openshift-4</a></li>
+</ul>
+<h2 id="installing-a-helm-chart-on-an-openshift-container-platform-cluster">Installing a Helm chart on an OpenShift Container Platform cluster</h2>
+<p>Fuente: <a href="https://docs.openshift.com/container-platform/4.10/applications/working_with_helm_charts/configuring-custom-helm-chart-repositories.html">https://docs.openshift.com/container-platform/4.10/applications/working_with_helm_charts/configuring-custom-helm-chart-repositories.html</a></p>
+<blockquote>
+<p>Prerequisites</p>
+<p>You have a running OpenShift Container Platform cluster and you have logged into it.</p>
+<p>You have installed Helm.</p>
+</blockquote>
+<p>Procedimiento</p>
+<blockquote>
+<p>Create a new project:</p>
+</blockquote>
+<div class="codigo"><pre><code>$ oc new-project vault
+    Now using project &quot;vault&quot; on server &quot;https://api.k8spro.nextret.net:6443&quot;.
+    You can add applications to this project with the &#39;new-app&#39; command. For example, try:
+        oc new-app rails-postgresql-example
+    to build a new example application in Ruby. Or use kubectl to deploy a simple Kubernetes application:
+        kubectl create deployment hello-node --image=k8s.gcr.io/serve_hostname
+</code></pre></div><blockquote>
+<p>Add a repository of Helm charts to your local Helm client:</p>
+</blockquote>
+<div class="codigo"><pre><code>$ helm repo add openshift-helm-charts https://charts.openshift.io/
+    &quot;openshift-helm-charts&quot; has been added to your repositories
+</code></pre></div><blockquote>
+<p>Update the repository:</p>
+</blockquote>
+<div class="codigo"><pre><code>$ helm repo update
+    Hang tight while we grab the latest from your chart repositories...
+    ...Successfully got an update from the &quot;openshift-helm-charts&quot; chart repository
+    Update Complete. Happy Helming!
+</code></pre></div><blockquote>
+<p>Install an example HashiCorp Vault:</p>
+</blockquote>
+<div class="codigo"><pre><code>$ helm install example-vault openshift-helm-charts/hashicorp-vault
+    NAME: example-vault
+    LAST DEPLOYED: Tue Jun 13 12:53:24 2023
+    NAMESPACE: vault
+    STATUS: deployed
+    REVISION: 1
+    NOTES:
+    Thank you for installing HashiCorp Vault!
+    Now that you have deployed Vault, you should look over the docs on using
+    Vault with Kubernetes available here:
+    https://www.vaultproject.io/docs/
+    Your release is named example-vault. To learn more about the release, try:
+      $ helm status example-vault
+      $ helm get manifest example-vault
+</code></pre></div><p>Con <code>helm status example-vault</code> se obtiene la misma salida anterior.</p>
+<p>Lista de instalaciones de Helm.</p>
+<div class="codigo"><pre><code>&gt; helm list
+NAME            NAMESPACE       REVISION        UPDATED                                 STATUS          CHART           APP VERSION
+example-vault   vault           1               2023-06-13 12:53:24.3780837 +0200 CEST  deployed        vault-0.24.0    1.13.1
+</code></pre></div><p>Manifiestos K8s generados por la instalación.</p>
+<div class="codigo"><pre><code>&gt; helm get manifest example-vault
+    ---
+    # Source: vault/templates/injector-network-policy.yaml
+    apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata:
+      name: example-vault-agent-injector
+    (...)
+</code></pre></div><p><a name="11_vault_md" /></p>
+<h1 id="instalaci-n-de-vault">Instalación de Vault</h1>
+<p>La instalación de Vault se realizón en dos intentos:</p>
+<ul>
+<li>El primero según la documentación oficial de OpenShift que tenía algunas restricciones que nos hace descartar el método. Ver detalles en <a href="#11_vault_fail_md">Instalación de Vault según la documentación de OpenShift</a>.</li>
+<li>El segundo como parte de un tutorial que satisface lo que se considera necesario.</li>
+</ul>
+<p>Esta segunda referencia es muy similar pero<br>solventa los problemas vistos en la primera opción.<br><a href="https://medium.com/hybrid-cloud-engineering/vault-integration-into-openshift-container-platform-b57c175a79da">https://medium.com/hybrid-cloud-engineering/vault-integration-into-openshift-container-platform-b57c175a79da</a></p>
+<p>Cuidado: Esta referencia está bien para instalar Vault, pero luego usa el método más complejo de inyección al contenedor. El objetivo es actualizar un secreto, simplemente.</p>
+<h2 id="instalaci-n-con-ui-e-inicializaci-n">Instalación con UI e inicialización</h2>
+<h3 id="crear-un-namespace-para-todo-lo-vault">Crear un namespace para todo lo Vault</h3>
+<blockquote>
+<p>First, create a namespace in OCP called vault-infra using the following command:</p>
+</blockquote>
+<div class="codigo"><pre><code>oc create namespace vault-infra
+    namespace/vault-infra created
+</code></pre></div><blockquote>
+<p>This namespace will be the home for Vault in your OCP environment. Confirm that the new namespace is created with the following command:</p>
+</blockquote>
+<div class="codigo"><pre><code>oc get namespaces | grep vault-infra
+    vault-infra                                        Active   89s
+</code></pre></div><h3 id="clonar-localmente-el-helm-chart-de-vault">Clonar localmente el Helm chart de Vault</h3>
+<blockquote>
+<p>Clone the vault-helm GitHub repository into your local filesystem (using the command below). This step makes it much easier to keep track of the configuration changes you make to the Vault helm chart before you install it.</p>
+</blockquote>
+<div class="codigo"><pre><code>git clone https://github.com/hashicorp/vault-helm.git
+    Cloning into &#39;vault-helm&#39;...
+    remote: Enumerating objects: 4008, done.
+    remote: Counting objects: 100% (1843/1843), done.
+    remote: Compressing objects: 100% (300/300), done.
+    remote: Total 4008 (delta 1710), reused 1588 (delta 1537), pack-reused 2165
+    Receiving objects: 100% (4008/4008), 1.05 MiB | 4.38 MiB/s, done.
+    Resolving deltas: 100% (3010/3010), done.
+</code></pre></div><h3 id="ajustar-el-clon-local-del-helm-chart-de-vault">Ajustar el clon local del Helm chart de Vault</h3>
+<blockquote>
+<p>The most important piece is the <code>values.yaml</code> file. The Vault helm chart will use this file to customize the Vault instance to your specifications. There are a large number of different configuration options ranging from high availability (HA), audit logging, probes, and more. For the purposes of this article, I will give the configuration for a quick and easy install. </p>
+<p>In the <code>values.yaml</code> change the following keys:</p>
+</blockquote>
+<p>No es casual que se deba activar la opción de OpenShift, donde desplegamos,<br>y las de ruta y UI que eran las que se echaban en falta.</p>
+<div class="codigo"><pre><code>global:
+  openshift: true
+server:
+  route: true
+ui:
+  enabled: true
+</code></pre></div><h3 id="definir-un-nombre-para-la-ruta-de-acceso">Definir un nombre para la ruta de acceso</h3>
+<p>Atención! En <code>values.yaml</code> hay varias entradas que definen <code>chart-example.local</code> como nombre de la ruta/ingress para acceder a la consola de Vault.</p>
+<p>El guión en el nombre no funciona con el <code>etc/hosts</code> de Windows. Cambiar <code>chart-example.local</code> por un nombre que se pueda resolver por este fichero,<br>o bien si funciona el DNS con el sufijo del cluster poner un nombre que encaje,<br>por ejemplo: <code>vaultinfra.apps.k8spro.nextret.net</code>.</p>
+<p>Nótese como se define como ruta, ingress inactivo, cuando se trata de deplegar a OpenShift.</p>
+<div class="codigo"><pre><code>  ingress:
+    enabled: false
+    hosts:
+      - host: vaultinfra.apps.k8spro.nextret.net
+  # OpenShift only - create a route to expose the service
+  # By default the created route will be of type passthrough
+  route:
+    enabled: true
+    host: vaultinfra.apps.k8spro.nextret.net
+</code></pre></div><h3 id="instalar-vault-a-partir-del-helm-chart-moldificado">Instalar Vault a partir del Helm Chart moldificado</h3>
+<blockquote>
+<p>Change directory into the vault-helm sub-directory and run the following command:</p>
+</blockquote>
+<div class="codigo"><pre><code>helm install vault . -n vault-infra
+</code></pre></div><p>La salida es similar a la opción probada en primer lugar y que se descartó.</p>
+<p>Probar <code>helm get manifest vault</code>.</p>
+<div class="codigo"><pre><code>NAME: vault
+LAST DEPLOYED: Tue Jun 13 13:24:57 2023
+NAMESPACE: vault-infra
+STATUS: deployed
+REVISION: 1
+NOTES:
+Thank you for installing HashiCorp Vault!
+Now that you have deployed Vault, you should look over the docs on using
+Vault with Kubernetes available here:
+https://www.vaultproject.io/docs/
+Your release is named vault. To learn more about the release, try:
+  $ helm status vault
+  $ helm get manifest vault
+</code></pre></div><h2 id="tareas-post-instalaci-n">Tareas post instalación</h2>
+<h3 id="unseal-del-vault">Unseal del Vault</h3>
+<p>Tal cual acaba de arrancar, el pod vault-0 del <code>statefulset</code> no está ready por estar pendiente del unsealing.</p>
+<blockquote>
+<p>You can then run the following command to check the status of your Vault deployment:</p>
+</blockquote>
+<div class="codigo"><pre><code>oc get pods -n vault-infra
+    NAME                                    READY   STATUS    RESTARTS   AGE
+    vault-0                                 0/1     Running   0          5m9s
+    vault-agent-injector-76f7d7d848-tqf5s   1/1     Running   0          5m9s
+</code></pre></div><blockquote>
+<p>What you will see is that the vault-0 pod is stuck in the Ready: 0/1 state. This is because Vault needs to be initialized and unsealed before it can be used. </p>
+<p>To see a more descriptive error message, navigate into the OpenShift console UI and navigate to Pods &gt; vault-0 &gt; Logs.</p>
+</blockquote>
+<p>En el log se ve este fragmento, cuyas tres últimas líneas indican que se debe proceder al usnealing para que se inicialice Vault.</p>
+<div class="codigo"><pre><code>==&gt; Vault server configuration:
+Api Address: http://172.17.5.214:8200
+Cgo: disabled
+Cluster Address: https://vault-0.vault-internal:8201
+Environment Variables: GODEBUG, HOME, HOSTNAME, HOST_IP, KUBERNETES_PORT, KUBERNETES_PORT_443_TCP, KUBERNETES_PORT_443_TCP_ADDR, KUBERNETES_PORT_443_TCP_PORT, KUBERNETES_PORT_443_TCP_PROTO, KUBERNETES_SERVICE_HOST, KUBERNETES_SERVICE_PORT, KUBERNETES_SERVICE_PORT_HTTPS, NAME, NSS_SDB_USE_CACHE, PATH, POD_IP, PWD, SHLVL, SKIP_CHOWN, SKIP_SETCAP, TERM, VAULT_ADDR, VAULT_AGENT_INJECTOR_SVC_PORT, VAULT_AGENT_INJECTOR_SVC_PORT_443_TCP, VAULT_AGENT_INJECTOR_SVC_PORT_443_TCP_ADDR, VAULT_AGENT_INJECTOR_SVC_PORT_443_TCP_PORT, VAULT_AGENT_INJECTOR_SVC_PORT_443_TCP_PROTO, VAULT_AGENT_INJECTOR_SVC_SERVICE_HOST, VAULT_AGENT_INJECTOR_SVC_SERVICE_PORT, VAULT_AGENT_INJECTOR_SVC_SERVICE_PORT_HTTPS, VAULT_API_ADDR, VAULT_CLUSTER_ADDR, VAULT_K8S_NAMESPACE, VAULT_K8S_POD_NAME, VAULT_PORT, VAULT_PORT_8200_TCP, VAULT_PORT_8200_TCP_ADDR, VAULT_PORT_8200_TCP_PORT, VAULT_PORT_8200_TCP_PROTO, VAULT_PORT_8201_TCP, VAULT_PORT_8201_TCP_ADDR, VAULT_PORT_8201_TCP_PORT, VAULT_PORT_8201_TCP_PROTO, VAULT_SERVICE_HOST, VAULT_SERVICE_PORT...
+Go Version: go1.20.1
+Listener 1: tcp (addr: &quot;[::]:8200&quot;, cluster address: &quot;[::]:8201&quot;, max_request_duration: &quot;1m30s&quot;, max_request_size: &quot;33554432&quot;, tls: &quot;disabled&quot;)
+Log Level:
+Mlock: supported: true, enabled: false
+Recovery Mode: false
+Storage: file
+Version: Vault v1.13.1, built 2023-03-23T12:51:35Z
+Version Sha: 4472e4a3fbcc984b7e3dc48f5a8283f3efe6f282
+==&gt; Vault server started! Log data will stream in below:
+2023-06-13T11:25:16.786Z [INFO] proxy environment: http_proxy=&quot;&quot; https_proxy=&quot;&quot; no_proxy=&quot;&quot;
+2023-06-13T11:25:16.787Z [INFO] core: Initializing version history cache for core
+2023-06-13T11:25:23.421Z [INFO] core: security barrier not initialized
+2023-06-13T11:25:23.421Z [INFO] core: seal configuration missing, not initialized
+2023-06-13T11:25:28.446Z [INFO] core: security barrier not initialized
+2023-06-13T11:25:28.447Z [INFO] core: seal configuration missing, not initialized
+</code></pre></div><p>De paso, al principio del log salen las variables de entorno definidas, algunas de las cuales usaremos luego.</p>
+<div class="codigo"><pre><code>Environment Variables: GODEBUG, HOME, HOSTNAME, HOST_IP, KUBERNETES_PORT, KUBERNETES_PORT_443_TCP, KUBERNETES_PORT_443_TCP_ADDR, KUBERNETES_PORT_443_TCP_PORT, KUBERNETES_PORT_443_TCP_PROTO, KUBERNETES_SERVICE_HOST, KUBERNETES_SERVICE_PORT, KUBERNETES_SERVICE_PORT_HTTPS, NAME, NSS_SDB_USE_CACHE, PATH, POD_IP, PWD, SHLVL, SKIP_CHOWN, SKIP_SETCAP, TERM, VAULT_ADDR, VAULT_AGENT_INJECTOR_SVC_PORT, VAULT_AGENT_INJECTOR_SVC_PORT_443_TCP, VAULT_AGENT_INJECTOR_SVC_PORT_443_TCP_ADDR, VAULT_AGENT_INJECTOR_SVC_PORT_443_TCP_PORT, VAULT_AGENT_INJECTOR_SVC_PORT_443_TCP_PROTO, VAULT_AGENT_INJECTOR_SVC_SERVICE_HOST, VAULT_AGENT_INJECTOR_SVC_SERVICE_PORT, VAULT_AGENT_INJECTOR_SVC_SERVICE_PORT_HTTPS, VAULT_API_ADDR, VAULT_CLUSTER_ADDR, VAULT_K8S_NAMESPACE, VAULT_K8S_POD_NAME, VAULT_PORT, VAULT_PORT_8200_TCP, VAULT_PORT_8200_TCP_ADDR, VAULT_PORT_8200_TCP_PORT, VAULT_PORT_8200_TCP_PROTO, VAULT_PORT_8201_TCP, VAULT_PORT_8201_TCP_ADDR, VAULT_PORT_8201_TCP_PORT, VAULT_PORT_8201_TCP_PROTO, VAULT_SERVICE_HOST, VAULT_SERVICE_PORT...
+</code></pre></div><blockquote>
+<p>Initialize and Unseal Vault</p>
+<p>To initialize and unseal Vault, use the Vault CLI tool. The Vault CLI comes preinstalled in the vault container within the vault-0 pod, so I will use the Terminal tab of the container for all following commands. Alternatively, you can exec into the pod or install the Vault CLI tool locally and use your own terminal to run Vault commands.</p>
+<p>To first initialize the Vault, run the following command:</p>
+</blockquote>
+<p>Desde el terminal del pod <code>vault-0</code> (ir al <code>statefulset</code> y buscar sus pods).<br>Tendremos un primer error que corregiremos.</p>
+<div class="codigo"><pre><code># vault version
+    Vault v1.13.1 (4472e4a3fbcc984b7e3dc48f5a8283f3efe6f282), built 2023-03-23T12:51:35Z
+
+# vault operator init
+    Error initializing: Error making API request.
+
+    URL: PUT http://127.0.0.1:8200/v1/sys/init
+    Code: 400. Errors:
+
+    * failed to initialize barrier: failed to persist keyring: mkdir /vault/data/core: permission denied
+</code></pre></div><p>Corregimos el error dando permisos al directorio para una install de pruebas. Luego habrá que probar cual es la mejor solución.</p>
+<div class="codigo"><pre><code>chmod a+w  /vault/data
+</code></pre></div><p>Corregido el error y con el comando de inicialización salen</p>
+<ul>
+<li>Las 5 claves de unseal, con 3 de las cuales podremos hacer unseal ya que son el quorum necesario.</li>
+<li>El root token que servirá para hacer login en un Vault <em>unsealed</em>.</li>
+</ul>
+<div class="codigo"><pre><code>vault operator init
+    Unseal Key 1: TBf03DweOoMQ3A3EvxqS/wX4kZb1JV3IQOQAkNK79v7c
+    Unseal Key 2: 7lSvenOE5mDq3O1xJlBqs5q4FrHJDpxT9Uri3m7FW+lH
+    Unseal Key 3: f6HwDGcyMcvbXKOJMbaPQS9TjuxiOySeR/YIHSGxZLli
+    Unseal Key 4: niF2XCa0pBCC5Hvxq/kH+SxximC6Hjm8Sfdkq0NQ+8kM
+    Unseal Key 5: YqBZ0yTFUl4YYFQmFQS91+Nlznyp/YN7aWGVlaGQ9abv
+
+    Initial Root Token: hvs.MbBT9J9ZXyGvlJCjV8CG1IjD
+
+    Vault initialized with 5 key shares and a key threshold of 3. Please securely
+    distribute the key shares printed above. When the Vault is re-sealed,
+    restarted, or stopped, you must supply at least 3 of these keys to unseal it
+    before it can start servicing requests.
+
+    Vault does not store the generated root key. Without at least 3 keys to
+    reconstruct the root key, Vault will remain permanently sealed!
+
+    It is possible to generate new unseal keys, provided you have a quorum of
+    existing unseal keys shares. See &quot;vault operator rekey&quot; for more information.
+</code></pre></div><blockquote>
+<p>As stated in the text of the image above, Vault needs 3/5 of the unseal keys to unseal the Vault. It is very important to remember these keys! In addition, it is important to keep track of the initial root token, because this will allow login and configuration of your Vault resources. To unseal the Vault, run the following command with 3 of your unseal keys:</p>
+<p>The most important pieces are the <code>Sealed=true</code> and <code>Unseal Progress</code> key-value pairs.</p>
+</blockquote>
+<p>Basta con ir ejecutando el comando <code>vault operator unseal</code> con hasta tres de las claves.</p>
+<div class="codigo"><pre><code>vault operator unseal TBf03DweOoMQ3A3EvxqS/wX4kZb1JV3IQOQAkNK79v7c
+    Key                Value
+    ---                -----
+    Seal Type          shamir
+    Initialized        true
+--&gt;    Sealed             true
+    Total Shares       5
+    Threshold          3
+--&gt;    Unseal Progress    1/3
+    Unseal Nonce       9ecf62da-64e9-47d4-8967-a9b87a1e1c76
+    Version            1.13.1
+    Build Date         2023-03-23T12:51:35Z
+    Storage Type       file
+    HA Enabled         false
+vault operator unseal 7lSvenOE5mDq3O1xJlBqs5q4FrHJDpxT9Uri3m7FW+lH
+    Sealed             true
+    Unseal Progress    2/3
+vault operator unseal f6HwDGcyMcvbXKOJMbaPQS9TjuxiOySeR/YIHSGxZLli
+    Sealed             false
+</code></pre></div><blockquote>
+<p>Success, Vault is now initialized and unsealed! I checked my running pods and found that the vault-0 pod changed to a Ready: 1/1 state.</p>
+</blockquote>
+<p>Una vez inicializado, el pod se manifiesta como arrancado.</p>
+<div class="codigo"><pre><code>&gt;oc get pods -n vault-infra
+    NAME                                    READY   STATUS    RESTARTS   AGE
+    vault-0                                 1/1     Running   0          26m
+    vault-agent-injector-76f7d7d848-tqf5s   1/1     Running   0          26m
+</code></pre></div><blockquote>
+<p>Before running the Vault commands in the following sections, you need to login to Vault using the root token acquired in the last section. The root token will also be used later on to login to the Vault UI. To do so, run the following command:</p>
+</blockquote>
+<p>Como se decía, login con el root para poder ejecutar comandos de Vault en el pod <code>vault-0</code>.</p>
+<div class="codigo"><pre><code>vault login hvs.MbBT9J9ZXyGvlJCjV8CG1IjD
+
+    Success! You are now authenticated. The token information displayed below
+    is already stored in the token helper. You do NOT need to run &quot;vault login&quot;
+    again. Future Vault requests will automatically use this token.
+
+    Key                  Value
+    ---                  -----
+    token                hvs.LRpjkv1Kg0o9Gmj7N9bgkRDz
+    token_accessor       nw6T3xFMklkwu0Qht1JL13es
+    token_duration       ∞
+    token_renewable      false
+    token_policies       [&quot;root&quot;]
+    identity_policies    []
+    policies             [&quot;root&quot;]
+</code></pre></div><h3 id="playground-crear-secretos">Playground: Crear secretos</h3>
+<blockquote>
+<p>Now that all the permissions are set up, it is time to create a secret to store into Vault. The example application in the later section of this article expects a database username and password stored in the ceh/database/credentials Vault path. To create the database secret, first create the ceh path with the following command:</p>
+</blockquote>
+<p>Un pequeño ejemplo de creación de secretos en la fuente de referencia.</p>
+<p>Primero es necesario habilitar el path raíz <code>ceh</code> del path del secreto, y asociarle un tipo <code>kv-v2</code> de motor de secretos.</p>
+<div class="codigo"><pre><code>vault secrets enable -path=ceh kv-v2
+    Success! Enabled the kv-v2 secrets engine at: ceh/
+</code></pre></div><blockquote>
+<p>This creates the ceh path with the kv-v2 secrets engine. You can find more information about Vault secrets engines here. Create a username and password entry with the following command:</p>
+</blockquote>
+<p>Ya se puede crear un secreto en el path <code>ceh/database/credentials</code> bajo el path autorizado anteriormente.<br>Nótese que aunque el path que veremos en la GUI es el que pasamos en el comando,<br>el que usaremos más adelante en las configuraciones<br>es el que aparece en la respuesta bajo <code>Secret Path</code><br>y en el que se intercala un  <code>/data</code> tras el directorio raíz habilitado.</p>
+<div class="codigo"><pre><code>vault kv put ceh/database/credentials \
+  username=&quot;db-username&quot; \
+  password=&quot;db-password&quot;
+
+    ======== Secret Path ========
+    ceh/data/database/credentials
+
+    ======= Metadata =======
+    Key                Value
+    ---                -----
+    created_time       2023-06-13T11:55:01.028736078Z
+    custom_metadata    &lt;nil&gt;
+    deletion_time      n/a
+    destroyed          false
+    version            1
+</code></pre></div><p>Este secreto se puede ver ya en la GUI en <a href="https://vaultinfra.apps.k8spro.nextret.net/ui/vault/secrets/ceh/show/database/credentials">https://vaultinfra.apps.k8spro.nextret.net/ui/vault/secrets/ceh/show/database/credentials</a>.<br>Pero no, ver siguiente apartado.</p>
+<p>Nota: De nuevo ver como se separa la raíz del resto con un <code>/show/</code> intermedio.</p>
+<h3 id="configurar-tls-de-la-ruta">Configurar TLS de la ruta</h3>
+<p>Al acceder a <a href="https://vaultinfra.apps.k8spro.nextret.net/ui/vault/secrets/ceh/show/database/credentials">https://vaultinfra.apps.k8spro.nextret.net/ui/vault/secrets/ceh/show/database/credentials</a><br>el navegador recibe una respuesta incorrecta debido a que el tráfico https se pasa tal cual a Vault en :8200.</p>
+<p>Basta cambiar la ruta para tener <code>tls.termination: edge</code>. El <code>tls.termination: passthrough</code> anterior viene del Helm que ya se había modificado para el nombre del host.</p>
+<div class="codigo"><pre><code>spec:
+  host: vaultinfra.apps.k8spro.nextret.net
+  to:
+    kind: Service
+    name: vault
+    weight: 100
+  port:
+    targetPort: 8200
+  tls:
+    termination: edge
+</code></pre></div><p>Sobre las terminaciones de TLS:</p>
+<blockquote>
+<p>Routes can be either secured or unsecured. Secure routes provide the ability to use several types of TLS termination to serve certificates to the client. Unsecured routes are the simplest to configure, because they require no key or certificates, but secured routes encrypt traffic to and from the pods. A secured route specifies the TLS termination of the route. The available types of termination are listed below:</p>
+<ul>
+<li><p>Edge Termination With edge termination, TLS termination occurs at the router, before the traffic gets routed to the pods. TLS certificates are served by the router, so they must be configured into the route, otherwise the router’s default certificate is used for TLS termination. Because TLS is terminated at the router, connections from the router to the endpoints over the internal network are not encrypted.</p>
+</li>
+<li><p>Pass-through Termination With pass-through termination, encrypted traffic is sent straight to the destination pod without the router providing TLS termination. No key or certificate is required. The destination pod is responsible for serving certificates for the traffic at the endpoint.</p>
+</li>
+<li><p>Re-encryption Termination Re-encryption is a variation on edge termination, where the router terminates TLS with a certificate, then re-encrypts its connection to the endpoint, which might have a different certificate. Therefore the full path of the connection is encrypted, even over the internal network.</p>
+</li>
+</ul>
+</blockquote>
+<p>Y ya en la pantalla, entramos con método <code>Token</code> indicando el valor del root token <code>hvs.MbBT9J9ZXyGvlJCjV8CG1IjD</code><br>y podemos navegar al secreto antes creado <a href="https://vaultinfra.apps.k8spro.nextret.net/ui/vault/secrets/ceh/show/database/credentials">https://vaultinfra.apps.k8spro.nextret.net/ui/vault/secrets/ceh/show/database/credentials</a>.</p>
+<h3 id="autenticaci-n-de-kubernetes">Autenticación de Kubernetes</h3>
+<blockquote>
+<p>Configuring Kubernetes Authentication</p>
+</blockquote>
+<blockquote>
+<p>Before the Vault secrets can be injected into a pod, the pod needs to be able to authenticate itself to the Vault service. Vault supports multiple authentication methods which can be found here. For this article I used the Kubernetes auth method because of how easy it is to set up. To first enable the auth method endpoint, run the following command:</p>
+</blockquote>
+<p>Este método de autenticación no está previsto en esta prueba de concepto.</p>
+<p><a name="12_argocd_md" /></p>
+<h1 id="instalaci-n-de-argocd">Instalación de ArgoCD</h1>
+<p>ArgoCD, al igual que Vault, es una de las precondiciones necesarias para poder usar el ArgoCD Vault Plugin (AVP).</p>
+<p>Para poder configurar ArgoCD a nuestro antojo (Vault lo requiere, o Deus Vault si se prefiere)<br>es mejor no instalar el operador de ArgoCD para Openshift<br>sino instalar el <strong>operador OpenShift GitOps</strong> que es el propio de OpenShift.</p>
+<h2 id="instalaci-n-de-operador-openshift-gitops">Instalación de operador OpenShift GitOps</h2>
+<p>Seguir lo aquí indicado, instalando para todos los namespaces del cluster.</p>
+<ul>
+<li><a href="https://github.com/redhat-developer/openshift-gitops-getting-started">https://github.com/redhat-developer/openshift-gitops-getting-started</a></li>
+</ul>
+<blockquote>
+<p>Log into OpenShift Web Console as a cluster admin and navigate to the Administrator perspective and then Operators → OperatorHub.</p>
+<p>In the OperatorHub, search for OpenShift GitOps and follow the operator install flow to install it.</p>
+</blockquote>
+<h2 id="instancia-personalizada-de-argocd">Instancia personalizada de ArgoCD</h2>
+<p>En próximos intentos descubriremos que es necesario<br>hacer un despliegue de ArgoCD personalizado (con el Vault Plugin)<br>ya que no se puede modificar el gestionado por openshift-gitops<br>(un operador muy temperamental sobre lo que él gestiona).</p>
+<p>Para empezar a probar el despliegue de una instancia personalizada seguiremos el artículo:<br><a href="https://github.com/redhat-developer/openshift-gitops-getting-started#additional-argo-cd-instances">https://github.com/redhat-developer/openshift-gitops-getting-started#additional-argo-cd-instances</a></p>
+<blockquote>
+<p>Additional Argo CD instances</p>
+<p>Although OpenShift GitOps by default installs an Argo CD instance for the cluster, there are use-cases where different application teams might need their own Argo CD instance confined to their own namespaces and applications. Therefore, OpenShift GitOps support creating additional Argo CD instances declaratively through creating ArgoCD resources.</p>
+<p>In the OpenShift Web Console, create a project called myargocd and then click on the plus sign in the top navigation bar. Then, paste the following in the YAML editor, and click on Create afterwards:</p>
+</blockquote>
+<p>En la consola crear el namespace <code>myargocd</code> y aplicar este manifiesto desde el icono del símbolo <strong>+</strong></p>
+<div class="codigo"><pre><code>apiVersion: argoproj.io/v1alpha1
+kind: ArgoCD
+metadata:
+  name: myargocd
+spec:
+  server:
+    route:
+      enabled: true
+</code></pre></div><blockquote>
+<p>Alternatively, you can run the following CLI commands:</p>
+</blockquote>
+<p>Se desconoce de donde sale este <code>argo/argocd.yaml</code>, o sea que mejor aplicar el YAML anterior.</p>
+<div class="codigo"><pre><code>oc new-project myargocd
+oc create -f argo/argocd.yaml
+</code></pre></div><h3 id="acceso-a-los-servidores-argocd">Acceso a los servidores ArgoCD</h3>
+<blockquote>
+<p>Click on the Topology to view the Argo CD instance deployed in your namespace.</p>
+<p>Click on the Argo CD URL to open the Argo CD dashboard.</p>
+</blockquote>
+<p>El pod <code>myargocd-server</code> es el que tiene la flecha con el hover Open URL.</p>
+<blockquote>
+<p>As described previously, Argo CD upon installation generates an initial admin password which is stored in a Kubernetes secret called <code>[argocd-name]-cluster</code>. Run the following command to decrypt the admin password and log into Argo CD dashboard:</p>
+</blockquote>
+<p>Método que proponen:</p>
+<div class="codigo"><pre><code>oc get secret myargocd-cluster -n myargocd -ojsonpath=&#39;{.data.admin\.password}&#39; | base64 -d
+
+    5Jmx...Tq8
+</code></pre></div><p>También se puede usar el método tradicional que no requiere entrar a un bash para tener base64:</p>
+<div class="codigo"><pre><code>oc extract secret/myargocd-cluster -n myargocd --to=-
+
+    # admin.password
+    5Jmx...Tq8
+</code></pre></div><p>Para el operador openshift-gitops en otro namespace</p>
+<div class="codigo"><pre><code>oc extract secret/openshift-gitops-cluster -n openshift-gitops --to=-
+</code></pre></div><p>Como resultado, quedan dos servidores ArgoCD accesibles, el por defecto y el que se acaba de instalar, respectivamente:</p>
+<ul>
+<li><a href="https://openshift-gitops-server-openshift-gitops.apps.k8spro.nextret.net/applications">https://openshift-gitops-server-openshift-gitops.apps.k8spro.nextret.net/applications</a></li>
+<li><a href="https://myargocd-server-myargocd.apps.k8spro.nextret.net/applications">https://myargocd-server-myargocd.apps.k8spro.nextret.net/applications</a></li>
+</ul>
+<p>NB: En la vista de topología está en enlace a cada argo server, pero al final la URL no deja de ser:</p>
+<div class="codigo"><pre><code>https://${namespace}-server-${namespace}.apps.${cluster}
+</code></pre></div><h2 id="utilidades">Utilidades</h2>
+<h3 id="instalaci-n-de-argocd-l-nea-de-comandos">Instalación de ArgoCD línea de comandos</h3>
+<p>El cliente de ArgoCD de línea de comandos puede ser de utilidad a futuro.</p>
+<blockquote>
+<p>The argocd CLI makes it easier to work with Argo CD. Through it, you can manage Argo CD projects, applications, cluster credentials, and more.</p>
+<p>To install the argocd CLI, follow these steps:</p>
+</blockquote>
+<blockquote>
+<ul>
+<li>Download the latest Argo CD binary file from <a href="https://github.com/argoproj/argo-cd/releases/latest">https://github.com/argoproj/argo-cd/releases/latest</a>.</li>
+<li>If you are using Linux, download the CLI and add it to your path:</li>
+</ul>
+</blockquote>
+<div class="codigo"><pre><code>$ sudo curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+$ sudo chmod +x /usr/local/bin/argocd
+</code></pre></div><blockquote>
+<p>If everything went well, you will see the following output by running the argocd version command. Ignore the error message you see in the last line; it is an expected message as we haven’t logged in to any OpenShift cluster yet:</p>
+</blockquote>
+<div class="codigo"><pre><code>argocd version
+
+    argocd: v2.2.1+122ecef
+      BuildDate: 2021-12-17T01:31:40Z
+      GitCommit: 122ecefc3abfe8b691a08d9f3cecf9a170cc8c37
+      GitTreeState: clean
+      GoVersion: go1.16.11
+      Compiler: gc
+      Platform: linux/amd64
+    FATA[0000] Argo CD server address unspecified
+</code></pre></div><h3 id="api-de-argocd">API de ArgoCD</h3>
+<p>La API de ArgoCD puede ser útil a futuro para automatizar operaciones administrativas de recursos de ArgoCD.</p>
+<ul>
+<li><a href="https://myargocd-server-myargocd.apps.k8spro.nextret.net/swagger-ui">https://myargocd-server-myargocd.apps.k8spro.nextret.net/swagger-ui</a></li>
+<li><a href="https://argo-cd.readthedocs.io/en/stable/developer-guide/api-docs/">https://argo-cd.readthedocs.io/en/stable/developer-guide/api-docs/</a></li>
+</ul>
+<p>Ejemplo de login via API. <code>-k</code>para evitar el error de TLS.</p>
+<div class="codigo"><pre><code>ARGOCD_SERVER=https://myargocd-server-myargocd.apps.k8spro.nextret.net
+curl -k $ARGOCD_SERVER/api/v1/session -d $&#39;{&quot;username&quot;:&quot;admin&quot;,&quot;password&quot;:&quot;5Jm...Tq8&quot;}&#39;
+</code></pre></div><h2 id="argocd-en-cualquier-namespace">ArgoCD en cualquier namespace</h2>
+<p>La instalación personalizada es capaz de desplegar solo en su propio namespace. </p>
+<p>Para desplegar en un conjunto de namespaces (restringido por seguridad) se debería seguir esta guía.</p>
+<ul>
+<li><a href="https://argo-cd.readthedocs.io/en/stable/operator-manual/app-any-namespace/">https://argo-cd.readthedocs.io/en/stable/operator-manual/app-any-namespace/</a></li>
+</ul>
+<p>No obstante, en otro punto de este documento se detalla como crear el namespace ya manejado por el namespace de la instancia de ArgoCD, sin más complicación.</p>
+<p><a name="20_avp_md" /></p>
+<h1 id="argocd-vault-plugin-avp-">ArgoCD Vault Plugin (AVP)</h1>
+<p>Esta página contiene documentación y presentación de ArgoCD Vault Plugin (AVP).</p>
+<p>Para el proceso de instalación y configuración de AVP en una prueba de concepto, consultar:</p>
+<ul>
+<li><a href="#21_avp_install_md">Instalación de ArgoCD Vault Plugin (AVP)</a>.</li>
+<li><a href="#22_avp_vault_approle_md">Autenticación y autorización por approle en Vault</a>.</li>
+<li><a href="#23_avp_argocd_approle_md">Despliegue de aplicaciones en ArgoCD con Vault approle</a>.</li>
+</ul>
+<h2 id="documentaci-n-de-avp">Documentación de AVP</h2>
+<p>Como documentación de referencia, la página de proyecto y la de readthedocs.io. </p>
+<ul>
+<li><a href="https://github.com/argoproj-labs/argocd-vault-plugin">https://github.com/argoproj-labs/argocd-vault-plugin</a></li>
+<li><a href="https://argocd-vault-plugin.readthedocs.io/">https://argocd-vault-plugin.readthedocs.io/</a></li>
+</ul>
+<p>Un par de páginas de utilidad: los backends compatibles para almacenar secretos, y una lista de releases para estar al día de las disponibles.</p>
+<ul>
+<li><a href="https://argocd-vault-plugin.readthedocs.io/en/stable/backends/">https://argocd-vault-plugin.readthedocs.io/en/stable/backends/</a></li>
+<li><a href="https://github.com/argoproj-labs/argocd-vault-plugin/releases">https://github.com/argoproj-labs/argocd-vault-plugin/releases</a></li>
+</ul>
+<p>Esta guía propone un par de variantes que se pueden usar algún día: Crear una imagen de ArgoCD con el plugin instalado, y configurar la autenticación en Vault usando el service account que ejecuta en Kubernetes.</p>
+<ul>
+<li><a href="https://cloud.redhat.com/blog/how-to-use-hashicorp-vault-and-argo-cd-for-gitops-on-openshift">https://cloud.redhat.com/blog/how-to-use-hashicorp-vault-and-argo-cd-for-gitops-on-openshift</a></li>
+</ul>
+<h2 id="presentaci-n-de-avp">Presentación de AVP</h2>
+<p>El resto de esta página contiene la parte descriptiva del artículo.<br> <a href="https://itnext.io/argocd-secret-management-with-argocd-vault-plugin-539f104aff05">https://itnext.io/argocd-secret-management-with-argocd-vault-plugin-539f104aff05</a>.</p>
+<blockquote>
+<p>GitOps has quickly become one of the hotter topics within the realm of DevOps. GitOps was introduced by Weaveworks in 2017 and has been trending upward ever since. I will not go into why to use GitOps in this article but you can read more about it here. One of the questions that always comes up when discussing GitOps is Secret Management. Every single talk, presentation or demo involving GitOps always has someone bringing up the question, “How do you handle secrets with GitOps?”, and that is a very good question.</p>
+<p>As our team was evaluating moving to GitOps, we landed on using ArgoCD as our GitOps solution. ArgoCD provided a stable tool that could handle deploying hundreds of microservices across many different Kubernetes Clusters in a fast and reliable way.</p>
+<p>Once we chose our GitOps tool, it was time to figure out what to do about the Secrets problem. At the same time, we were starting to migrate our Secrets to HashiCorp Vault, so we knew we would need something that could bridge the gap between ArgoCD and Vault. We looked around at some existing tools and one of the issues we found were that the potential solutions to this problem had a very high barrier to entry. Whether that was having to manually encrypt secrets or deploying Operators to do some of the work, none of these solutions fit well with what my team was trying to do.</p>
+<p>So, we decided to build our own tool called argocd-vault-plugin.</p>
+<p>What is the argocd-vault-plugin?</p>
+<p>The argocd-vault-plugin is a custom ArgoCD plugin for retrieving secrets from HashiCorp Vault and injecting them into Kubernetes YAML files. Within ArgoCD, there is a way to integrate custom plugins if you need something outside of the supported tools that are built-in and we wanted to take advantage of this pattern. One of the ideas behind this plugin was to write it in a way that did not require an Operator or Custom Resource. This allows us to be able to parameterize any Kubernetes resources, even Custom Resources, not just Secrets.</p>
+<p>The plugin works by first retrieving values from Vault based on a path that can be specified as an Environment Variable or an Annotation inside of the YAML file and then injects the values into a templated out yaml, that uses &lt;&gt; as the template markers. For example:</p>
+</blockquote>
+<div class="codigo"><pre><code>kind: Secret
+apiVersion: v1
+metadata:
+  name: example-secret
+  annotations:
+    avp.kubernetes.io/path: &quot;path/to/secret&quot;
+type: Opaque
+stringData:
+  password: &lt;password-vault-key&gt;
+</code></pre></div><blockquote>
+<p>In the yaml above, you see that we have a normal Kubernetes Secret definition. However, something is not quite normal. Under data, we have a secret named password but the value is &lt;password-vault-key&gt; this is where the plugin will inject a value if it finds the password-vault-key key in Vault.</p>
+<p>So when the plugin runs, it will take the avp.kubernetes.io/pathannotation from the yaml and use that to look for the secrets we want to inject into this Kubernetes Secret. So we take the avp.kubernetes.io/path annotation and combine it with the value inside the &lt;&gt; symbols. So the final path in this scenario would be path/to/secret with the Vault key password-vault-key. So when the plugin finishes running, we would have yaml that looks like this:</p>
+</blockquote>
+<div class="codigo"><pre><code>kind: Secret
+apiVersion: v1
+metadata:
+  name: example-secret
+  annotations:
+    avp.kubernetes.io/path: &quot;path/to/secret&quot;
+type: Opaque
+stringData:
+  password: some-password # From the key password-vault-key in Vault
+</code></pre></div><blockquote>
+<p>You can view all the supported backends and authentication types here, <a href="https://argocd-vault-plugin.readthedocs.io/en/stable/backends/">https://argocd-vault-plugin.readthedocs.io/en/stable/backends/</a>.</p>
+</blockquote>
+<p><a name="21_avp_install_md" /></p>
+<h1 id="instalaci-n-de-argocd-vault-plugin-avp-">Instalación de ArgoCD Vault Plugin (AVP)</h1>
+<p>Instalar AVP se resume a que en uno de los servidores de ArgoCD se disponga de<br>un binario ejecutable capaz de hacer cambios en los manifiestos que maneja ArgoCD. Este binario debe:</p>
+<ul>
+<li>Estar registrado como plugin para que se pueda seleccionar durante la creación de una aplicación ArgoCD.</li>
+<li>Ser capaz de recibir configuración de como acceder a un repositorio de secretos externo, lo que se hará a través de variables de entorno.</li>
+<li>Con la configuración dada, acceder al repositorio de secretos y con lo obtenido realizar cambios en los manifiestos, poniendo en ellos información sensible que no debiera estar en ningún repositorio de código abierto a cualquiera.<br>Recordatorio: Los manifiestos para poder ser enriquecidos con secretos por ArgoCD deben estar anotados, la anotación debe dar un path o información de como llegar al secreto deseado en el sistema externo configurado, y tener unas marcas de sustitución con el nombre atributo del secreto rodeado por <code>&lt;</code> y <code>&gt;</code>. </li>
+</ul>
+<h2 id="retos-opciones-y-alternativas">Retos, opciones y alternativas</h2>
+<p><strong>Forma de transferir los secretos</strong></p>
+<p>En esta prueba se hace una instalación del tipo que ArgoCD despliega secretos de K8s que contienen los secretos de Valt visibles para administradores de cluster y namespace. Es un riesgo asumido y asumible si las políticas de seguridad en efecto lo permiten.</p>
+<p><strong>Tipo de instalación del plugin</strong></p>
+<p>Existe la alternativa de usar contenedores inyectores, que durante el ciclo de vida del contenedor principal inyectan en la memoria de este el secreto acabado de leer de Vault.</p>
+<ul>
+<li><a href="https://developer.hashicorp.com/vault/docs/platform/k8s/injector">https://developer.hashicorp.com/vault/docs/platform/k8s/injector</a></li>
+</ul>
+<p>La instalación tal como se propone plantea varias opciones:</p>
+<ul>
+<li>La forma de instalar el AVP usada en esta prueba de concepto es la de<br>los llamados <code>initContainer</code> que arrancan con el contenedor compartiendo espacio de disco.<br>El <code>initContainer</code> es quien se encarga de obtener el plugin y dejarlo en el contenedor principal antes de salir de escena al acabar la inicialización.</li>
+<li>Hay alternativas como crear imágenes del servidor ArgoCD con el plugin ya instalado.</li>
+</ul>
+<p><strong>Modificación de componentes del operador de ArgoCD</strong></p>
+<p>Las configuraciones requeridas hacen necesario reconfigurar alguno de los servidores de ArgoCD.</p>
+<p>Se ha observado que el operador <em>gitops-operator</em> o &quot;ArgoCD de Red Hat&quot; no siempre permite estas reconfiguraciones, y se ha optado por una instancia personalizada.</p>
+<p><strong>TTL de los secret id en Vault approle</strong></p>
+<p>En este modo de autenticación y autorización en Vault, existe un id de rol inmutable (asimilable al &quot;nombre de usuario&quot; del rol) y un secret id que hace las funciones de password del rol.<br>El id de secreto tiene una validez temporal de máximo 720 horas o 30 días. Suficiente para una prueba de concepto, pero no para explotación.</p>
+<p>Esta limitación es buscada para forzar una política de renovación de secretos, entendida como buena práctica.</p>
+<h2 id="instalaci-n-argocd-vault-plugin-avp-">Instalación ArgoCD Vault Plugin (AVP)</h2>
+<p>Seguiremos la sección <strong>How to Install and use the Plugin</strong> de <a href="https://itnext.io/argocd-secret-management-with-argocd-vault-plugin-539f104aff05">https://itnext.io/argocd-secret-management-with-argocd-vault-plugin-539f104aff05</a><br>hasta llegar al punto en que se empiezan a configurar approles. En ese momento seguiremos en<br><a href="#22_avp_vault_approle_md">Autenticación y autorización por approle en Vault</a> y<br><a href="#23_avp_argocd_approle_md">Despliegue de aplicaciones en ArgoCD con Vault approle</a> donde se explica en detalle al margen de la instalación.</p>
+<h3 id="make-plugin-available-to-be-used-by-argocd">Make Plugin Available to be used by ArgoCD</h3>
+<blockquote>
+<p>In order to use the plugin, we first need to download the plugin and then register the plugin with ArgoCD to use as a custom plugin. There are a couple different methods for doing this that you can read about here but for this example we are going to use the Volume Mount strategy. In order to do this, we will have to customize the argocd-repo-server deployment:</p>
+</blockquote>
+<p>Se intenta inyectar un <code>initContainer</code> en el <code>repo server</code> para que al arrancar descargue el plugin y lo copie donde toca.</p>
+<p><strong>Cómo no hacerlo</strong></p>
+<p>O también &quot;con <em>openshift-gitops</em> hemos topado&quot;:</p>
+<ul>
+<li>Si se edita el deployment del repo server mientras este ejecuta:<div class="codigo"><pre><code>Error &quot;Forbidden: pod updates may not add or remove containers&quot; for field &quot;spec.initContainers&quot;.
+</code></pre></div></li>
+<li>Si se para y se edita, salta este warning y no se guarda. Soltar el warning forma parte de lo correcto en OpenShift<br><a href="http://openshift.github.io/openshift-origin-design/designs/administrator/olm/warn-managed-resource/">http://openshift.github.io/openshift-origin-design/designs/administrator/olm/warn-managed-resource/</a>.<div class="codigo"><pre><code>This resource is managed by ArgoCD
+ACD
+openshift-gitops
+and any modifications may be overwritten. Edit the managing resource to preserve changes.
+http://openshift.github.io/openshift-origin-design/designs/administrator/olm/warn-managed-resource/
+</code></pre></div></li>
+</ul>
+<p><strong>Qué hay que montar</strong></p>
+<p>Estos son los cambios necesarios para poder inyectar el plugin AVP con<br>el initContainer <code>download-tools</code> en el <code>repo server</code>,<br>con el que comparte un <code>volumeMount</code> llamado <code>/custom-tools</code>.<br>El volumen compartido se monta en un directorio de trabajo del initContainer,<br>pero para el repo server es el directorio de binarios en el path del sistema.</p>
+<div class="codigo"><pre><code>containers:
+- name: argocd-repo-server
+  volumeMounts:
+  - name: custom-tools
+    mountPath: /usr/local/bin/argocd-vault-plugin
+    subPath: argocd-vault-plugin
+
+volumes:
+- name: custom-tools
+  emptyDir: {}
+
+initContainers:
+- name: download-tools
+  image: alpine:3.8
+  command: [sh, -c]
+  args:
+    - wget -O argocd-vault-plugin
+      https://github.com/argoproj-labs/argocd-vault-plugin/releases/download/v1.6.0/argocd-vault-plugin_1.6.0_linux_amd64
+
+      chmod +x argocd-vault-plugin &amp;&amp;\
+      mv argocd-vault-plugin /custom-tools/
+  volumeMounts:
+    - mountPath: /custom-tools
+      name: custom-tools
+</code></pre></div><h3 id="inserci-n-del-plugin">Inserción del plugin</h3>
+<p>En el namespace donde esté la instancia personalizada de ArgoCD (<code>myargocd</code> en esta prueba),<br>ir al despliegue del <code>argocd-repo-server</code>.<br>En su ficha aparece debajo del nombre un enlace <em>managed by</em>.<br>Acceder a ese recurso de tipo ArgoCD y editar el YAML<br>cambiando el <code>repo {}</code> por esta estructura con<br><code>volumes</code>, <code>volumeMounts</code> e <code>initContainers</code>:</p>
+<div class="codigo"><pre><code>apiVersion: argoproj.io/v1alpha1
+kind: ArgoCD
+spec:
+  repo:
+    volumes:
+      - emptyDir: {}
+        name: custom-tools
+    volumeMounts:
+      - mountPath: /usr/local/bin/argocd-vault-plugin
+        name: custom-tools
+        subPath: argocd-vault-plugin
+    initContainers:
+      - command:
+          - sh
+          - &#39;-c&#39;
+        args:
+          - &gt;-
+            cd /tmp
+
+            wget -O argocd-vault-plugin https://github.com/argoproj-labs/argocd-vault-plugin/releases/download/v1.6.0/argocd-vault-plugin_1.6.0_linux_amd64
+
+            chmod +x argocd-vault-plugin &amp;&amp; mv argocd-vault-plugin /custom-tools/
+        image: &#39;alpine:3.8&#39;
+        name: download-tools
+        volumeMounts:
+          - mountPath: /custom-tools
+            name: custom-tools
+</code></pre></div><p>Es interesante ver como en el arranque del initContainer se va<br>al directorio /tmp para hacer una descarga a la que luego se le dan permisos de ejecución y luego se envía al directorio compartido con el repo server.</p>
+<p>Se propone que la descarga del plugin sea de un repositorio controlado y no directamente de github.</p>
+<p>Para depurar el arranque del initContainer con <code>oc logs</code><br>hay que usar la opción <code>-c download-tools</code> después del id del pod, según<br><a href="https://kubernetes.io/docs/tasks/debug/debug-application/debug-init-containers/">https://kubernetes.io/docs/tasks/debug/debug-application/debug-init-containers/</a></p>
+<div class="codigo"><pre><code>oc logs myargocd-repo-server-74cbcc69b7-wzfkw -c download-tools
+    Connecting to github.com (140.82.121.3:443)
+    Connecting to objects.githubusercontent.com (185.199.108.133:443)
+    argocd-vault-plugin   42% |*************                  | 17335k  0:00:01 ETA
+    argocd-vault-plugin   74% |**********************         | 30119k  0:00:00 ETA
+    argocd-vault-plugin   92% |****************************   | 37607k  0:00:00 ETA
+    argocd-vault-plugin  100% |*******************************| 40672k  0:00:00 ETA
+</code></pre></div><p>En este punto cuando ya ha arrancado el contenedor principal con el plugin copiado y ejecutable,<br>se puede entrar por terminal y validar que ejecute.</p>
+<div class="codigo"><pre><code>argocd-vault-plugin
+
+    This is a plugin to replace &lt;placeholders&gt; with Vault secrets
+    Usage:
+      argocd-vault-plugin [flags]
+      argocd-vault-plugin [command]
+    Available Commands:
+      completion  generate the autocompletion script for the specified shell
+      generate    Generate manifests from templates with Vault values
+      help        Help about any command
+      version     Print argocd-vault-plugin version information
+    Flags:
+      -h, --help   help for argocd-vault-plugin
+    Use &quot;argocd-vault-plugin [command] --help&quot; for more information about a command.
+
+argocd-vault-plugin version
+
+    argocd-vault-plugin v1.6.0 (947668d260d7e630b3dbc7d9dadfc4ed0650ccd3) BuildDate: 2021-12-01T21:37:22Z
+`
+</code></pre></div><p>Esta ejecución a demanda se puede hacer incluso en otro Linux incluído WSL-2 en Windows, lo que resultó esclarecedor para trazar algún error de configuración (como se verá, pasando variables de entorno).</p>
+<h3 id="registrar-el-plugin-en-argocd">Registrar el plugin en ArgoCD</h3>
+<p>Por plugin disponible (<em>available</em>) se entiende que el repo server ya lo puede ejecutar, aunque de momento no es más que un binario en el path de ejecutables.</p>
+<blockquote>
+<p>Once the plugin has been made available,<br>the next step is to register the plugin with ArgoCD itself.<br>This is a pretty straight forward step.<br>There is a configMap called <code>argocd-cm</code>. All that is required to to go to that configMap and add:</p>
+</blockquote>
+<p>En el configMap <code>argocd-cm</code> del namespace <code>myargocd</code> se efectúa este cambio.<br>Básicamente se le dice a ArgoCD que dispone de este plugin que durante la fase <code>generate</code> de ArgoCD deberá ser llamado con los parámetros para generar en el directorio actual.<br>A los parámetros <code>args</code> del plugin se le pueden añadir otros si se tiene claro donde se va.</p>
+<div class="codigo"><pre><code>data:
+  configManagementPlugins: |-
+    - name: argocd-vault-plugin
+      generate:
+        command: [&quot;argocd-vault-plugin&quot;]
+        args: [&quot;generate&quot;, &quot;./&quot;]
+</code></pre></div><p><strong>gitops-operator no editable</strong></p>
+<p>Al editar el configMap <code>argocd-cm</code> tendremos de nuevo el agradable aviso de que no es posible al ser un recurso manejado.<br>Editaremos el recurso manejante y situaremos la información así:</p>
+<div class="codigo"><pre><code>apiVersion: argoproj.io/v1alpha1
+kind: ArgoCD
+spec:
+  configManagementPlugins: |-
+    - name: argocd-vault-plugin
+      generate:
+        command: [&quot;argocd-vault-plugin&quot;]
+        args: [&quot;generate&quot;, &quot;./&quot;]
+</code></pre></div><p><strong>Validación de la disponibilidad del plugin</strong></p>
+<p>Para validar la disponibilidad del plugin:</p>
+<ul>
+<li>Rearrancar el reposerver (llevar a cero instancias, y el manejador subirá a 1 automágicamente).</li>
+<li>Entrar a la UI del servidor.<ul>
+<li>Crear una aplicación.</li>
+<li>Scroll down hasta pasar los grupos <em>general, source, destination</em></li>
+<li>El desplegable del último grupo seleccionar <em>Plugins</em></li>
+<li>En la sección de <em>Plugins</em> encontrar el <em>ArgoCD Vault Plugin</em> en el desplegable de nombres.</li>
+</ul>
+</li>
+</ul>
+<p><strong>Deprecación de los argocd-cm CMP</strong></p>
+<p>El proyecto ArgoCD tiene la intención de quitar el soporte de<br>los Config Management Plugins (CMP) que usan configmap argocd-cm<br>en favor del uso de sidecars (contenedores a los que se les manda un tarball con los manifiestos manejados y que devuelven otro tarball).</p>
+<ul>
+<li><a href="https://github.com/argoproj/argo-cd/issues/8117">https://github.com/argoproj/argo-cd/issues/8117</a></li>
+<li><a href="https://argo-cd.readthedocs.io/en/stable/operator-manual/config-management-plugins/">https://argo-cd.readthedocs.io/en/stable/operator-manual/config-management-plugins/</a></li>
+</ul>
+<p><a name="22_avp_vault_approle_md" /></p>
+<h1 id="autenticaci-n-y-autorizaci-n-por-approle-en-vault">Autenticación y autorización por approle en Vault</h1>
+<p>Esta página propone ejecutar la parte de creación de autentiación y autorización en Vault con approle,<br>de forma independiente de otras tareas para centrarse y evitar confusiones.</p>
+<p>El role y la policy de Vault creadas se utilizarán en el último paso.</p>
+<h2 id="documentaci-n-de-referencia">Documentación de referencia</h2>
+<p>Referencias sobre authn por approle. El tutorial incluye las policies..</p>
+<ul>
+<li><a href="https://itnext.io/argocd-secret-management-with-argocd-vault-plugin-539f104aff05">https://itnext.io/argocd-secret-management-with-argocd-vault-plugin-539f104aff05</a></li>
+<li><a href="https://developer.hashicorp.com/vault/docs/auth/approle">https://developer.hashicorp.com/vault/docs/auth/approle</a></li>
+<li><a href="https://developer.hashicorp.com/vault/tutorials/auth-methods/approle">https://developer.hashicorp.com/vault/tutorials/auth-methods/approle</a></li>
+<li><a href="https://github.com/werne2j/arogcd-vault-plugin-demo">https://github.com/werne2j/arogcd-vault-plugin-demo</a></li>
+</ul>
+<p>Similar, pero para authn por kubernetes (service account y RBAC)</p>
+<ul>
+<li><a href="https://cloud.redhat.com/blog/how-to-use-hashicorp-vault-and-argo-cd-for-gitops-on-openshift">https://cloud.redhat.com/blog/how-to-use-hashicorp-vault-and-argo-cd-for-gitops-on-openshift</a></li>
+</ul>
+<p>La última versión de todo es el Vault Agent, con inyección de secretos, mutating webhooks y otras exquisiteces de implementación no trivial.</p>
+<ul>
+<li><a href="https://cloud.redhat.com/blog/integrating-hashicorp-vault-in-openshift-4">https://cloud.redhat.com/blog/integrating-hashicorp-vault-in-openshift-4</a></li>
+<li><a href="https://developer.hashicorp.com/vault/docs/platform/k8s/injector">https://developer.hashicorp.com/vault/docs/platform/k8s/injector</a></li>
+<li><a href="https://developer.hashicorp.com/vault/tutorials/kubernetes/kubernetes-sidecar">https://developer.hashicorp.com/vault/tutorials/kubernetes/kubernetes-sidecar</a></li>
+</ul>
+<h2 id="ejecucion-tutorial">Ejecucion tutorial</h2>
+<p>Se sigue el tutorial de la lista anterior:</p>
+<ul>
+<li><a href="https://developer.hashicorp.com/vault/tutorials/auth-methods/approle">https://developer.hashicorp.com/vault/tutorials/auth-methods/approle</a></li>
+</ul>
+<p>Se trabaja en el terminal del pod <code>vault-0</code> del statefulset correspondiente.</p>
+<h3 id="variables-de-entorno-para-un-vault-en-local">Variables de entorno para un vault en local</h3>
+<p>Skip, ya estamos en el terminal de <code>vault-0</code>. Queda la duda de por qué se anotó este par de valores.</p>
+<div class="codigo"><pre><code>export VAULT_ADDR=http://127.0.0.1:8200
+export VAULT_TOKEN=root
+</code></pre></div><h3 id="tareas-previas-como-administrador-en-vault">Tareas previas como administrador en Vault</h3>
+<p>Sin estar recogidos en en tutorial, es necesario para evitar un 403/404 en paso siguiente.</p>
+<p>Si no se dispone del token, habrá que rearrancar el Vault para que muestre el token y las llaves de desellado (<em>unsealing</em>). Ver el documento de instalación de Vault.</p>
+<div class="codigo"><pre><code>vault login hvs.MbBT9J9ZXyGvlJCjV8CG1IjD
+</code></pre></div><p>El path enabled <code>-path=secret</code> es solo el directorio raíz del path de los secretos que se quieran crear.</p>
+<div class="codigo"><pre><code>vault secrets enable -path=secret kv-v2
+</code></pre></div><h3 id="crear-un-secreto-para-el-test">Crear un secreto para el test</h3>
+<blockquote>
+<ol start="4">
+<li>Create some test data.</li>
+</ol>
+</blockquote>
+<p>Atención al <code>Secret Path</code> en la respuesta, donde se inserta el conocido <code>/data</code> detrás del path habilitado. </p>
+<div class="codigo"><pre><code>vault kv put secret/mysql/webapp db_name=&quot;users&quot; username=&quot;admin&quot; password=&quot;passw0rd&quot;
+
+    ====== Secret Path ======
+    secret/data/mysql/webapp
+    ======= Metadata =======
+    Key                Value
+    ---                -----
+    created_time       2023-08-03T08:05:36.718175618Z
+    custom_metadata    &lt;nil&gt;
+    deletion_time      n/a
+    destroyed          false
+    version            1
+</code></pre></div><h3 id="habilitar-approle-como-m-todo-de-autenticaci-n-en-vault">Habilitar approle como método de autenticación en Vault</h3>
+<blockquote>
+<p>Step 1: Enable AppRole auth method (Persona: admin)</p>
+<p>Enable approle auth method by executing the following command.</p>
+</blockquote>
+<p>El siguiente comando ya estaba ejecutado de anteriores pruebas.</p>
+<div class="codigo"><pre><code>vault auth enable approle
+</code></pre></div><h3 id="crear-un-role-con-una-policy-de-acceso-al-secreto">Crear un role con una policy de acceso al secreto</h3>
+<blockquote>
+<p>Step 2: Create a role with policy attached<br>(Persona: admin)</p>
+</blockquote>
+<h4 id="crear-la-policy-de-acceso-al-secreto">Crear la policy de acceso al secreto</h4>
+<blockquote>
+<p>When you enabled the AppRole auth method, it gets mounted at the /auth/approle path. In this example, you are going to create a role for the app persona (jenkins in our scenario).<br>First, create a policy named jenkins with following definition.</p>
+</blockquote>
+<p>Ejemplo de definición de policy, no ejecutar:</p>
+<div class="codigo"><pre><code># Read-only permission on secrets stored at &#39;secret/data/mysql/webapp&#39;
+path &quot;secret/data/mysql/webapp&quot; {
+  capabilities = [ &quot;read&quot; ]
+}
+</code></pre></div><p>Ahora si, aplicar la definición anterior de policy que permite leer el secreto en el path de sus datos (incluye <code>/data/</code>).</p>
+<blockquote>
+<p>Before creating a role, create a jenkins policy.</p>
+</blockquote>
+<div class="codigo"><pre><code>vault policy write jenkins -&lt;&lt;EOF
+# Read-only permission on secrets stored at &#39;secret/data/mysql/webapp&#39;
+path &quot;secret/data/mysql/webapp&quot; {
+  capabilities = [ &quot;read&quot; ]
+}
+EOF
+
+    Success! Uploaded policy: jenkins
+</code></pre></div><h4 id="creaci-n-del-role-con-la-policy-anterior">Creación del role con la policy anterior</h4>
+<blockquote>
+<p>Creates a role named jenkins with jenkins policy attached. The generated token&#39;s time-to-live (TTL) is set to 1 hour and can be renewed for up to 4 hours of its first creation. (NOTE: This example creates a role which operates in pull mode.)</p>
+</blockquote>
+<p>Interesa el <code>token_policies</code> que relaciona con la política de lectura anterior.<br>Somos generosos con el TTL, en lugar de horas.</p>
+<div class="codigo"><pre><code>vault write auth/approle/role/jenkins \
+    token_policies=&quot;jenkins&quot; \
+    token_ttl=5d token_max_ttl=30d
+
+    Success! Data written to: auth/approle/role/jenkins
+</code></pre></div><blockquote>
+<p>Read the jenkins role you created to verify.</p>
+</blockquote>
+<div class="codigo"><pre><code>vault read auth/approle/role/jenkins
+
+    Key                        Value
+    ---                        -----
+    ...
+    token_max_ttl              720h
+    token_policies             [jenkins]
+    token_ttl                  120h
+</code></pre></div><h3 id="obtenci-n-de-roleid-y-secretid">Obtención de RoleID y SecretID</h3>
+<blockquote>
+<p>Step 3: Get RoleID and SecretID</p>
+</blockquote>
+<blockquote>
+<p>The RoleID and SecretID are like a username and password that a machine or app uses to authenticate.<br>Since the example created a jenkins role which operates in pull mode, Vault will generate the SecretID. You can set properties such as usage-limit, TTLs, and expirations on the SecretIDs to control its lifecycle.<br>To retrieve the RoleID, invoke the auth/approle/role/&lt;ROLE_NAME&gt;/role-id endpoint. To generate a new SecretID, invoke the auth/approle/role/&lt;ROLE_NAME&gt;/secret-id endpoint.</p>
+</blockquote>
+<h4 id="obtenci-n-de-roleid">Obtención de RoleID</h4>
+<p>Primero obtener el <code>role_id</code>, el equivalente al &quot;nombre de usuario&quot; del role para las operaciones de autenticación. El nombre que le hemos dado sería el nombre descriptivo.</p>
+<blockquote>
+<p>Now, you need to fetch the RoleID and SecretID of a role.<br>Execute the following command to retrieve the RoleID for the jenkins role.</p>
+</blockquote>
+<div class="codigo"><pre><code>vault read auth/approle/role/jenkins/role-id
+
+    Key        Value
+    ---        -----
+    role_id    9fa0a37a-d130-0b6c-8b30-a18fb203dc10
+</code></pre></div><h4 id="obtenci-n-de-secretid">Obtención de SecretID</h4>
+<p>Luego de tener el <code>role_id</code> se puede obtener el <code>secret_id</code>.<br>En las operaciones de autenticación este sería la password.</p>
+<p>Importante notar que tiene una validez máxima de 30 días y que se debe hacer una renovación periódica por política de seguridad.</p>
+<blockquote>
+<p>Execute the following command to generate a SecretID for the jenkins role.</p>
+</blockquote>
+<div class="codigo"><pre><code>vault write -force auth/approle/role/jenkins/secret-id
+    Key                   Value
+    ---                   -----
+    secret_id             8f87d184-23e3-2cc0-b6bc-ca63478f83b7
+    secret_id_accessor    e0010d48-ce7f-e717-d47d-912d0150eb7a
+    secret_id_num_uses    0
+    secret_id_ttl         0s
+</code></pre></div><blockquote>
+<p>The -force (or -f) flag forces the write operation to continue without any data values specified. Or you can set parameters such as cidr_list.<br>If you specified secret_id_ttl, secret_id_num_uses, or bound_cidr_list on the role in Step 2, the generated SecretID carries out the conditions.</p>
+</blockquote>
+<blockquote>
+<p>Tip: The RoleID is similar to a username; therefore, you will get the same value for a given role. In this case, the jenkins role has a fixed RoleID. While SecretID is similar to a password that Vault will generate a new value every time you request it.</p>
+</blockquote>
+<h3 id="verificaci-n-anteriores-pasos">Verificación anteriores pasos</h3>
+<h4 id="login-con-roleid-y-secretid-para-obtener-token-de-acceso">Login con RoleID y SecretID para obtener token de acceso</h4>
+<blockquote>
+<p>Step 4: Login with RoleID &amp; SecretID<br>(Persona: app)</p>
+</blockquote>
+<blockquote>
+<p>To login, use the auth/approle/login endpoint by passing the RoleID and SecretID.<br>Example:</p>
+</blockquote>
+<div class="codigo"><pre><code>vault write auth/approle/login \
+    role_id=&quot;9fa0a37a-d130-0b6c-8b30-a18fb203dc10&quot; \
+    secret_id=&quot;8f87d184-23e3-2cc0-b6bc-ca63478f83b7&quot;
+
+        Key                     Value
+        ---                     -----
+        token                   hvs.CAESIIulXqsaZSsGj1DwRPeEp-g2Ssq1qa3OA04wPQp9LVLIGh4KHGh2cy50QXVTSUJIMzcxRDVEbHl1MEpGSElDdVM
+        token_accessor          LnCeSXHQux3PmtMZ0MrqIIDD
+        token_duration          120h
+        token_renewable         true
+        token_policies          [&quot;default&quot; &quot;jenkins&quot;]
+        identity_policies       []
+        policies                [&quot;default&quot; &quot;jenkins&quot;]
+        token_meta_role_name    jenkins
+</code></pre></div><blockquote>
+<p>Vault returns a client token with default and jenkins policies attached.<br>Store the generated token value in an environment variable named, APP_TOKEN.<br>Example:</p>
+</blockquote>
+<div class="codigo"><pre><code>export APP_TOKEN=&quot;hvs.CAESIIulXqsaZSsGj1DwRPeEp-g2Ssq1qa3OA04wPQp9LVLIGh4KHGh2cy50QXVTSUJIMzcxRDVEbHl1MEpGSElDdVM&quot;
+</code></pre></div><h4 id="leer-secreto-con-el-token-devuelto-por-el-login">Leer secreto con el token devuelto por el login</h4>
+<blockquote>
+<p>Step 5: Read secrets using the AppRole token<br>(Persona: app)</p>
+</blockquote>
+<p>Ejecutar en una sola línea:</p>
+<div class="codigo"><pre><code>VAULT_TOKEN=$APP_TOKEN vault kv get secret/mysql/webapp
+
+    ====== Secret Path ======
+    secret/data/mysql/webapp
+
+    ======= Metadata =======
+    Key                Value
+    ---                -----
+    created_time       2023-08-03T08:05:36.718175618Z
+    custom_metadata    &lt;nil&gt;
+    deletion_time      n/a
+    destroyed          false
+    version            1
+
+    ====== Data ======
+    Key         Value
+    ---         -----
+    db_name     users
+    password    passw0rd
+    username    admin
+</code></pre></div><p>Si se llama directamente a <code>vault kv get secret/mysql/webapp</code> se usa el login general en vault de la sesión bash.<br>Al poner delante <code>VAULT_TOKEN=$APP_TOKEN</code> si se tiene en cuenta ese valor específico. </p>
+<div class="codigo"><pre><code>VAULT_TOKEN=$APP_TOKEN vault kv delete secret/mysql/webapp
+    Error deleting secret/data/mysql/webapp: Error making API request.
+    URL: DELETE http://127.0.0.1:8200/v1/secret/data/mysql/webapp
+    Code: 403. Errors:
+    * 1 error occurred:
+            * permission denied
+</code></pre></div><h2 id="documentaci-n-adicional-sobre-role_id-y-secret_id">Documentación adicional sobre role_id y secret_id</h2>
+<p>Del recurso <a href="https://developer.hashicorp.com/vault/docs/auth/approle">https://developer.hashicorp.com/vault/docs/auth/approle</a></p>
+<p><strong>Credentials/Constraints</strong></p>
+<blockquote>
+<p>RoleID is an identifier that selects the AppRole against which the other credentials are evaluated. When authenticating against this auth method&#39;s login endpoint, the RoleID is a required argument (via role_id) at all times. By default, RoleIDs are unique UUIDs, which allow them to serve as secondary secrets to the other credential information. However, they can be set to particular values to match introspected information by the client (for instance, the client&#39;s domain name).</p>
+<p>SecretID is a credential that is required by default for any login (via secret_id) and is intended to always be secret. (For advanced usage, requiring a SecretID can be disabled via an AppRole&#39;s bind_secret_id parameter, allowing machines with only knowledge of the RoleID, or matching other set constraints, to fetch a token). SecretIDs can be created against an AppRole either via generation of a 128-bit purely random UUID by the role itself (Pull mode) or via specific, custom values (Push mode). Similarly to tokens, SecretIDs have properties like usage-limit, TTLs and expirations.</p>
+</blockquote>
+<p><strong>Pull and push SecretID modes</strong></p>
+<blockquote>
+<p>If the SecretID used for login is fetched from an AppRole, this is operating in Pull mode. If a &quot;custom&quot; SecretID is set against an AppRole by the client, it is referred to as a Push mode. Push mode mimics the behavior of the deprecated App-ID auth method; however, in most cases Pull mode is the better approach. The reason is that Push mode requires some other system to have knowledge of the full set of client credentials (RoleID and SecretID) in order to create the entry, even if these are then distributed via different paths. However, in Pull mode, even though the RoleID must be known in order to distribute it to the client, the SecretID can be kept confidential from all parties except for the final authenticating client by using Response Wrapping.</p>
+</blockquote>
+<blockquote>
+<p>Push mode is available for App-ID workflow compatibility, which in some specific cases is preferable, but in most cases Pull mode is more secure and should be preferred.</p>
+</blockquote>
+<p><strong>Further constraints</strong></p>
+<blockquote>
+<p>role_id is a required credential at the login endpoint. AppRole pointed to by the role_id will have constraints set on it. This dictates other required credentials for login. The bind_secret_id constraint requires secret_id to be presented at the login endpoint. Going forward, this auth method can support more constraint parameters to support varied set of Apps. Some constraints will not require a credential, but still enforce constraints for login. For example, secret_id_bound_cidrs will only allow logins coming from IP addresses belonging to configured CIDR blocks on the AppRole.</p>
+</blockquote>
+<p><a name="23_avp_argocd_approle_md" /></p>
+<h1 id="despliegue-de-aplicaciones-en-argocd-con-vault-approle">Despliegue de aplicaciones en ArgoCD con Vault approle</h1>
+<p>En este paso final se conecta la autenticación por approle de Vault con las credenciales de configuración del ArgoCD Vault Plugin (AVP).</p>
+<p>En resumen:</p>
+<ul>
+<li>Las credenciales necesarias se ponen en un secreto de OpenShift.</li>
+<li>Se modifica el repo server para que tome variables de entorno a partir del secreto anterior.<br>En estas variables va la configuración de AVP.</li>
+</ul>
+<h2 id="rotaci-n-de-secret_id">Rotación de secret_id</h2>
+<p>De cara a la rotación de <code>secret_id</code>, de los approle de Vault, será necesario poder periódicamente:</p>
+<ul>
+<li>Acceder a Vault para hacer un <code>write -f</code> que genere un nuevo <code>secret_id</code> (por API de Vault parece el mejor método).</li>
+<li>Actualizar el secreto (API de OpenShift).</li>
+<li>Rearrancar el repo server de ArgoCD para aplicar los cambios, como <code>rollout restarts</code>. </li>
+</ul>
+<p>Muy por encima, secretos y configmaps no son versionables en K8s, lo que hace difícil forzar rearranques. Pero esto también evita que configuraciones no validadas rearranquen un proyecto.</p>
+<p>A futuro, este artículo propone realizar los <code>rollout restarts</code><br>uniendo configMap o Secret con el deployment o statefulset<br>anotando en el YAML de los segundos el hash de los primeros.<br>Esto se podrá hacer de forma periódica y OpenShift/K8s sólo hará rearranques cuando haya un cambio verdadero.</p>
+<ul>
+<li><a href="https://blog.questionable.services/article/kubernetes-deployments-configmap-change/">https://blog.questionable.services/article/kubernetes-deployments-configmap-change/</a></li>
+</ul>
+<h2 id="antes-de-empezar">Antes de empezar</h2>
+<p>Tomamos como fuente </p>
+<ul>
+<li><a href="https://itnext.io/argocd-secret-management-with-argocd-vault-plugin-539f104aff05">https://itnext.io/argocd-secret-management-with-argocd-vault-plugin-539f104aff05</a></li>
+</ul>
+<p>Y suponemos al lector habituado con la guía anterior sobre approle, role_id y secret_id.<br>De esta aprovecharemos el approle <code>jenkins</code> y su política de acceso a un secreto en un path.<br>Pero usaremos otro secreto en otro path y añadiremos ese path a la política.</p>
+<h2 id="variables-de-entorno-para-configurar-el-avp">Variables de entorno para configurar el AVP</h2>
+<h3 id="conseguir-role_id-y-secret_id">Conseguir role_id y secret_id</h3>
+<p>Ir al namespace <code>myargocd</code><br>y abrir un terminal del repo server<br>donde podemos ejecutar el <code>argocd-vault-plugin</code>.<br>De una instalación anterior a esta prueba de concepto, tenemos en namespace <code>myargocd</code> en la instancia de <code>myargocd-repo-server</code>:<br>Los valores de <code>VAULT_ADDR</code>, <code>AVP_TYPE</code> y <code>AVP_AUTH_TYPE</code> son correctos.</p>
+<div class="codigo"><pre><code>echo $VAULT_ADDR &amp;&amp; echo $AVP_TYPE &amp;&amp; echo $AVP_AUTH_TYPE &amp;&amp; echo $AVP_ROLE_ID &amp;&amp; echo $AVP_SECRET_ID
+    http://vault.vault-infra.svc.cluster.local:8200
+    vault
+    approle
+    {role_id inadecuado}
+    {secret-id desfasado}
+</code></pre></div><p>Vamos al namespace y pod de vault y<br>usamos lo descrito para obtener un secret-id para el role_id definido.</p>
+<div class="codigo"><pre><code>vault login hvs.MbBT9J9ZXyGvlJCjV8CG1IjD
+    Success! ---
+vault read auth/approle/role/jenkins/role-id
+    role_id    9fa0a37a-d130-0b6c-8b30-a18fb203dc10
+vault write -force auth/approle/role/jenkins/secret-id
+    secret_id             25cf360f-3171-74c6-5cf0-f71cbc28d729
+    secret_id_accessor    4bd420b4-2f19-264a-7575-2f0931f3b0fa
+    secret_id_num_uses    0
+    secret_id_ttl         0s
+</code></pre></div><h3 id="paso-de-variables-de-entorno-por-secret">Paso de variables de entorno por Secret</h3>
+<p>El repo-server carga los valores como variables de entorno<br>desde un secret <code>argocd-vault-plugin-credentials</code> que vamos a crear.</p>
+<p>Aplicar este fichero con los valores oportunos pasados por el codificador base64.<br>Para ofuscar un valor en Base64 <strong>NO USAR BAJO NINGÚN CONCEPTO</strong><br>este comando, que añade un \n final<br><code>echo &quot;Valor a ofuscar&quot; | base64</code>.<br>Esto causó horrores intentando hacer que funcionase la conexión de AVP a Vault.</p>
+<p>Fichero a aplicar en el namespace <code>myargocd</code> con todos los valores en base64.</p>
+<div class="codigo"><pre><code>kind: Secret
+apiVersion: v1
+metadata:
+  name: argocd-vault-plugin-credentials
+  namespace: argocd
+type: Opaque
+data:
+  AVP_AUTH_TYPE: approle
+  AVP_TYPE: vault
+  AVP_ROLE_ID: your_role_id
+  AVP_SECRET_ID: your_secret_id
+  VAULT_ADDR: your_vault_addr
+</code></pre></div><p>Una vez aplicados los valores ofuscados se pueden ver los valores cargados revelándolos<br>en el apartado de Secrets del namespace <code>myargocd</code>.</p>
+<p>Para que el <code>repo-server</code> cargue los valores en este Secret como variables de entorno,<br>ir a Deployments -&gt; Repo Server y en la pestaña de <code>Environment</code><br>usar <code>All values from existing ConfigMaps or Secrets (envFrom) ConfigMap/Secret</code>.<br>Esto escribe el <code>envFrom</code> dentro de una de las instancias de <code>containers</code> (a la altura de las sondas y volume mounts) y allí se respeta.<br>No se puede editar manualmente en el YAML.</p>
+<p>El despliegue de repo-server necesita un reinicio para adquirir las variables de entorno en un nuevo pod.</p>
+<h4 id="otras-formas-de-definir-las-variables-de-entorno">Otras formas de definir las variables de entorno</h4>
+<p>La forma de definir las variables de entorno en el repo server es la más funcional encontrada.</p>
+<p>Anteriormente, en la fuente del tutorial se observaba:</p>
+<blockquote>
+<p>The only thing left to do is to make that secret available as environment variables in the argocd-repo-server pods. Go back to the argocd-repo-server deployment where you initially added the initContainer and add an envFrom pointing to the secret you just created.</p>
+</blockquote>
+<div class="codigo"><pre><code>containers:
+- name: argocd-repo-server
+  volumeMounts:
+  - name: custom-tools
+    mountPath: /usr/local/bin/argocd-vault-plugin
+    subPath: argocd-vault-plugin
+  envFrom:
+    - secretRef:
+        name: argocd-vault-plugin-credentials
+</code></pre></div><p>Cuidado que si los despliegues de ArgoCD están gestionados por _openshif_gitops_ habrá que definirlo en el YAML de su manejador, el ACD <code>myargocd</code>:</p>
+<div class="codigo"><pre><code>spec:
+  repo:
+    envFrom:
+      - secretRef:
+          name: argocd-vault-plugin-credentials
+</code></pre></div><blockquote>
+<p>That is it! You should now have a configured plugin pointing to your Vault. We are now ready to test out the plugin!</p>
+</blockquote>
+<p>Pues no. La entrada <code>envFrom</code> se borra y desaparece del YAML si se pretende meter en el YAML. Curiosamente, si que se conserva el <code>envFrom</code> si se pone en el <em>initContainer</em>, pero pasar variables de entorno desde un <em>initContainer</em> requiere soluciones demasiado creativas.</p>
+<p>Repasando el yaml que define el yaml de este CRD caemos en cuenta de que se puede definir como variables individuales (!)<br><a href="https://github.com/redhat-developer/gitops-operator/blob/master/config/crd/bases/argoproj.io_argocds.yaml">https://github.com/redhat-developer/gitops-operator/blob/master/config/crd/bases/argoproj.io_argocds.yaml</a></p>
+<div class="codigo"><pre><code>  repo:
+    env:
+      - name: VAULT_ADDR
+        valueFrom:
+          secretKeyRef:
+            name: argocd-vault-plugin-credentials
+            key: VAULT_ADDR
+</code></pre></div><p>Este método funciona pero no es tan compacto como el propuesto en primer lugar.</p>
+<h2 id="creaci-n-del-secreto">Creación del secreto</h2>
+<p>Para desplegar una aplicación de ejemplo es necesario crear<br>otro secreto en el path <code>avp/test</code>, lo que requiere los ya conocidos:</p>
+<div class="codigo"><pre><code>vault secrets enable -path=avp kv-v2
+vault kv put avp/test sample=secret
+    == Secret Path ==
+    avp/data/test
+
+    ======= Metadata =======
+    Key                Value
+    ---                -----
+    created_time       2023-08-07T05:57:40.32059702Z
+    custom_metadata    &lt;nil&gt;
+    deletion_time      n/a
+    destroyed          false
+    version            1 
+
+vault kv get avp/test
+    == Secret Path ==
+    avp/data/test
+    ===== Data =====
+    Key       Value
+    ---       -----
+    sample    secret
+</code></pre></div><p>Es necesaria una policy para leer <code>avp/test</code>.<br>Reciclamos la policy <code>jenkins</code> ya asociada al role homónimo</p>
+<p><a href="https://vaultinfra.apps.k8spro.nextret.net/ui/vault/policy/acl/jenkins">https://vaultinfra.apps.k8spro.nextret.net/ui/vault/policy/acl/jenkins</a></p>
+<div class="codigo"><pre><code># Read-only permission on secrets stored at &#39;secret/data/mysql/webapp&#39;
+path &quot;secret/data/mysql/webapp&quot; {
+  capabilities = [ &quot;read&quot; ]
+}
+# Más acceso para esta política.
+path &quot;avp/data/test&quot; {
+  capabilities = [ &quot;read&quot; ]
+}
+</code></pre></div><p>No se ha encontrado la forma de modificar la política desde CLI.</p>
+<h2 id="configuraci-n-aplicaci-n-argocd">Configuración aplicación ArgoCD</h2>
+<p>Usaremos la aplicación ejemplo definida en <a href="https://github.com/werne2j/arogcd-vault-plugin-demo">https://github.com/werne2j/arogcd-vault-plugin-demo</a><br>donde <code>example-secret.yaml</code> contiene:</p>
+<ul>
+<li>Una marca &lt;sample&gt; como el <code>sample</code> definido para el secreto en Vault.</li>
+<li>La anotación <code>avp.kubernetes.io/path: &quot;avp/data/test&quot;</code> que coincide con el secret path devuelto para el secreto en Vault.</li>
+</ul>
+<div class="codigo"><pre><code>kind: Secret
+apiVersion: v1
+metadata:
+  name: example-secret
+  annotations:
+    avp.kubernetes.io/path: &quot;avp/data/test&quot;
+type: Opaque
+stringData:
+  sample-secret: &lt;sample&gt;
+</code></pre></div><p>A través de la ruta <code>myargocd-server</code> llegamos a <a href="https://myargocd-server-myargocd.apps.k8spro.nextret.net">https://myargocd-server-myargocd.apps.k8spro.nextret.net</a></p>
+<p>Para obtener la password del usuario</p>
+<div class="codigo"><pre><code>oc extract secret/myargocd-cluster -n myargocd --to=-
+    # admin.password
+    5JmxFBg23eAcizLHvO0fNYEbdRPjXTq8
+</code></pre></div><p>Y a partir de aquí crear una aplicación tal como indica el tutorial de referencia.</p>
+<blockquote>
+<p>Open ArgoCD and create a new application</p>
+</blockquote>
+<blockquote>
+<p>We are going to name it sample-secret and put it in the default project</p>
+</blockquote>
+<blockquote>
+<p>I have a sample repo that we will use to pull a example secret file from at <a href="https://github.com/werne2j/arogcd-vault-plugin-demo">https://github.com/werne2j/arogcd-vault-plugin-demo</a></p>
+</blockquote>
+<blockquote>
+<p>We will put the secret in-cluster (Within the cluster ArgoCD is installed) and in the default namespace</p>
+</blockquote>
+<blockquote>
+<p>The last piece needed is to specify the argocd-vault-plugin plugin to be used</p>
+</blockquote>
+<blockquote>
+<p>Now we can click the create button and see if it worked!</p>
+</blockquote>
+<blockquote>
+<p>You should see an application created in the ArgoCD UI</p>
+</blockquote>
+<blockquote>
+<p>And if you click the application, you will hopefully see this:</p>
+</blockquote>
+<blockquote>
+<p>If so, you have successfully used the argocd-vault-plugin! We can confirm this by looking for the secret in Kubernetes and checking its value:</p>
+</blockquote>
+<p>El tutorial sugiere aquí refrescar el valor en Vault y volver a sincronizarlo.<br>Para el refresco con el hard refresh ver la siguiente sección <strong>Sincronización</strong></p>
+<blockquote>
+<p>However we are not done yet! One of the great things about the plugin is that if the value changes in Vault we can update the value in the cluster with little effort. So update the value in vault:</p>
+</blockquote>
+<div class="codigo"><pre><code>vault kv put avp/test sample=new_secret
+</code></pre></div><blockquote>
+<p>Now in ArgoCD you can do a hard refresh, this will perform a dry-run of the plugin</p>
+</blockquote>
+<blockquote>
+<p>Now you should notice that is application is out of sync:</p>
+</blockquote>
+<blockquote>
+<p>This means that the plugin performed the dry run and determined that the output was different than what was currently in the cluster. Now all we have to do is sync the application and we should see the application back green!</p>
+</blockquote>
+<h2 id="despliegue-en-otros-namespaces">Despliegue en otros namespaces</h2>
+<p>A efectos de un despliegue en ArgoCD hay que contar con un conjunto de ámbitos:</p>
+<ul>
+<li>El <strong>clúster</strong>, que en esta prueba de concepto se restringe al clúster local.</li>
+<li>El <strong>proyecto ArgoCD</strong>, que es una entidad que tiene sentido en el ámito de ArgoCD.</li>
+<li>El <strong>namespace</strong> o <strong>project</strong> de <strong>OpenShift</strong>.<br>Es la entidad que agrupa recursos de forma lógica en OpenShift.<br>Hay que tener cuidado de no confundirlo con el proyecto de ArgoCD.</li>
+</ul>
+<p>Con una instancia de ArgoCD fresca y sin más configuración<br>hay una limitación importante: <em>Sólo se puede desplegar al propio namespace de ArgoCD</em>. En esta prueba de concepto, <code>myargocd</code>.<br>Si al crear una app de ArgoCD se le da como destino un namespace sin preparar nada, tendremos el error:</p>
+<div class="codigo"><pre><code>ComparisonError
+Namespace &quot;mynamespace&quot; 
+for Secret &quot;example-secret&quot; 
+is not managed
+</code></pre></div><p>En <a href="https://access.redhat.com/solutions/6158462">https://access.redhat.com/solutions/6158462</a><br>se proponen dos soluciones en función de la granularidad que se quiera dar del control sobre el namespace destino.</p>
+<h3 id="control-total-del-namespace-destino">Control total del namespace destino</h3>
+<p>Esta solución consiste en crear (borrar si ya existe)<br>el namespace de forma que sea gestionado por ArgoCD.<br>Esto implica que ArgoCD puede hacer cualquier cosa en el namespace.</p>
+<div class="codigo"><pre><code>cat &lt;&lt; EOF &gt;&gt; nstest.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mynamespace
+  labels:
+    argocd.argoproj.io/managed-by: myargocd
+EOF
+
+oc apply -f nstest.yaml
+    namespace/mynamespace created
+</code></pre></div><p>Elementos a sustituir en el manifiesto:</p>
+<ul>
+<li><code>name: mynamespace</code>: new namespace to be managed by an existing Argo CD instance.</li>
+<li><code>argocd.argoproj.io/managed-by: myargocd</code>: namespace where Argo CD is deployed.</li>
+</ul>
+<p>Con esto ha sido posible deplegar la aplicación al nuevo namespace manejado por ArgoCD.</p>
+<h3 id="control-parcial-del-namespace-destino">Control parcial  del namespace destino</h3>
+<p>Se deja aquí anotada la opción que da control a ArgoCD con una granularidad fina de permisos, ya que el artículo requiere una cuenta de RedHat para acceder a leerlo.</p>
+<blockquote>
+<p>There are two options to grant permissions to ArgoCD<br>to manage different namespaces. First option applyes roles and rolebindings<br>and it is referenced in another solution (<a href="https://access.redhat.com/solutions/5875661)">https://access.redhat.com/solutions/5875661)</a>.<br>This solutions adds more flexibility as the resources and verbs<br>that are granted can be defined.</p>
+</blockquote>
+<blockquote>
+<p>It is needed to create a Role and a RoleBinding to give privileges to the new ArgoCD instance. This way, ArgoCD will be able to create resources in a different namespace.</p>
+</blockquote>
+<blockquote>
+<p>The <code>role.yaml</code> should be similar to the one below, but it can be configured with different verbs depending on the user case:</p>
+</blockquote>
+<div class="codigo"><pre><code>$ cat &lt;&lt; EOF &gt;&gt; role.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: &lt;role-name&gt;
+  namespace: &lt;target-ns&gt;
+rules:
+- apiGroups:
+  - &quot;*&quot;
+  resources:
+  - &quot;*&quot;
+  verbs:
+  - Get
+  - List
+  - Watch
+  - Patch
+EOF
+
+$ oc create -f  role.yaml
+</code></pre></div><p>The RoleBinding should be similar to the following:</p>
+<div class="codigo"><pre><code>$ cat &lt;&lt; EOF &gt;&gt; rolebinding.yaml
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: RoleBinding
+metadata:
+  name: &lt;role-binding-name&gt;
+  namespace: &lt;target-ns&gt;
+roleRef:
+  apiGroup: rbac.authorization.k8s.io  
+  kind: Role
+  name: &lt;role-name&gt;
+subjects:
+- kind: ServiceAccount
+  name: &lt;application-controller-name&gt; 
+  namespace: &lt;application-controller-namespace&gt; 
+EOF
+
+oc create -f  rolebinding.yaml
+</code></pre></div><p>Valores a sustituir:</p>
+<ul>
+<li><code>role-binding-name</code>: Nombre a voluntad para el role binding.</li>
+<li><code>role-name</code>: Nombre a voluntad para el role.</li>
+<li><code>target-ns</code>: El namespace a controlar ya creado.</li>
+<li><code>application-controller-name</code>: Suponemos para la prueba de concepto el <code>myargocd-application-controller</code>. </li>
+<li><code>application-controller-namespace</code>: Suponemos para la prueba de concepto el <code>myargocd</code>. </li>
+</ul>
+<blockquote>
+<p>After creating the Role and RoleBindig, the sync process should finish successfully.</p>
+</blockquote>
+<p>No lo hace pero por la necesidad ya indicada del tutorial de hacer un hard refresh para el caso de los secretos.</p>
+<h2 id="creaci-n-de-objetos-para-desplegar-una-app-en-argocd">Creación de objetos para desplegar una app en ArgoCD</h2>
+<p>Se ha visto como es necesario crear el namespace destino de forma que sea controlado por ArgoCD para poder desplegar.</p>
+<p>Del mismo modo, el proyecto de ArgoCD también tiene algunas sutilidades. Veamos un modo conveniente de crearlos.<br>Los objetos creados de forma conveniente tienen una ventaja: Aparecen en los desplegables de la página de creación de una app en la UI de ArgoCD.</p>
+<h3 id="creaci-n-del-proyecto">Creación del proyecto</h3>
+<p>El proyecto se puede crear sin más en la UI de ArgoCD.</p>
+<h3 id="registrar-el-repositorio-git">Registrar el repositorio git</h3>
+<p>Para repositorios públicos esto no es necesario, pero para repos privados protegidos con una clave privada lo siguiente es necesario. Y de paso y como se ha dicho, aparece en el desplegable de repositorios.</p>
+<p>Se recomienda tener un mínimo de repositorios de configuración de ArgoCD y luego usar el path relativo a la raíz. En la prueba de concepto se han usado repos específicos con <code>.</code> como path para usarlos directamente en su raíz.</p>
+<p>De otro proyecto en otra entidad tomamos este ejemplo.</p>
+<p>La autenticación se hace por una clave privada que tendremos en un fichero de texto llamado en este ejemplo <code>id_rsa</code> </p>
+<div class="codigo"><pre><code>-----BEGIN RSA PRIVATE KEY----- 
+MIIEowIBAAKCAQE(…)
+(…)OZmfh6DQ3D6pTGDPwxFFhX5sLrwshSgu11bW9
+-----END RSA PRIVATE KEY-----
+</code></pre></div><p>Se añade el URL de git repo el proyecto.</p>
+<div class="codigo"><pre><code>argocd repo add \
+  git@gitlab.irtve.rtve.int:kubernetes/rtve-app-pf-play.git
+
+    Repository &#39;git@gitlab.irtve.rtve.int:kubernetes/rtve-app-pf-play.git&#39; added
+</code></pre></div><p>Si el repositorio es privado y no se registra debidamente en ArgoCD, cuando se cree la aplicación se obtendrá un error como el siguiente:</p>
+<div class="codigo"><pre><code>Unable to create application: application spec for pf-news is invalid: 
+InvalidSpecError: application repo git@gitlab.irtve.rtve.int:kubernetes/rtve-app-pf-news.git is not permitted in project &#39;rtve-pro&#39;
+</code></pre></div><h3 id="permisos-en-el-namespace-destino">Permisos en el namespace destino</h3>
+<p>Esta es una solución alternativa a las vistas anteriormente, que funcionó con el <code>gitops-operator</code>, no en una instancia personalizada.</p>
+<p>Para que un proyecto de ArgoCD pueda desplegar en un namespace de Openshift es necesario ejecutar el comando <code>argocd proj add-destination &lt;PROJECT&gt; &lt;CLUSTER&gt;,&lt;NAMESPACE&gt;</code>, que permite que el namespace de Openshift sea destino de las aplicaciones en el proyecto ArgoCD. Esta operación es necesaria una sola vez para todas las aplicaciones en ese proyecto.</p>
+<div class="codigo"><pre><code>argocd proj add-destination \
+    rtve-pro \
+    https://kubernetes.default.svc \
+    rtve-pf
+</code></pre></div><p>Si no se ha permitido que el proyecto ArgoCD despliegue en el namespace de OpenShift, cuando se cree la aplicación se obtendrá un error como el siguiente:</p>
+<div class="codigo"><pre><code>Unable to create application: application spec for pf-news is invalid: 
+InvalidSpecError: application destination {https://kubernetes.default.svc rtve-pf} is not permitted in project &#39;rtve-pro&#39;
+</code></pre></div><p>Para disponer de los permisos de creación de aplicaciones en un namespace de OpenShift se eleva (previamente) el serviceaccount de ArgoCD a admin en Openshift.</p>
+<div class="codigo"><pre><code>&gt;oc adm policy add-role-to-user admin system:serviceaccount:openshift-gitops:openshift-gitops-argocd-application-controller -n rtve-pf
+</code></pre></div><p>La falta de esta elevación podría haber dado lugar a un mensaje como este</p>
+<div class="codigo"><pre><code>Unable to create application: permission denied: applications, create, rtve-pro/pf-news, sub: CiRhMzk4NDliZC05ZWQxLTRlMWUtYTdiMi1kOTcyOWRlMDEwNmYSCW9wZW5zaGlmdA, iat: 2022-12-14T08:50:39Z
+</code></pre></div><h2 id="refresco-y-deprecaci-n-del-avp">Refresco y deprecación del AVP</h2>
+<p>El tutorial seguido habla de la necesidad de hacer un hard refresh y luego sincronizar.<br>El hard refresh es una subopción disponible en el botón del refresh de la UI,<br>y también se puede hacer desde línea de comandos.<br>Después del hard refresh, por el método que sea, el sync de la aplicación ArgoCD trae los nuevos valores del Vault.</p>
+<p>La explicación plausible es que el secreto fuente en ArgoCD no cambia, tiene la misma marca de sustitución.<br>Al hacer el hard refresh se hace un <em>dry run</em> en el que ArgoCD ve que la salida del plugin es distinta de lo que tiene,<br>y es en ese momento cuando ArgoCD considera que está <code>OutOfSync</code> y ejecutará el siguiente sync realmente.</p>
+<div class="codigo"><pre><code>argocd app get sample-secrets-mynamespace --hard-refresh
+    time=&quot;2023-08-09T11:03:35+02:00&quot; level=warning msg=&quot;spec.plugin.name is set, which means this Application uses a plugin installed in the argocd-cm ConfigMap. Installing plugins via that ConfigMap is deprecated in Argo CD v2.5. Starting in Argo CD v2.6, this Application will fail to sync. Contact your Argo CD admin to make sure an upgrade plan is in place. More info: https://argo-cd.readthedocs.io/en/latest/operator-manual/upgrading/2.4-2.5/&quot;
+    Name:               myargocd/sample-secrets-mynamespace
+    Project:            myargocdproject
+    Server:             https://kubernetes.default.svc
+    Namespace:          mynamespace
+    URL:                https://myargocd-server-myargocd.apps.k8spro.nextret.net/applications/sample-secrets-mynamespace
+    Repo:               https://github.com/werne2j/arogcd-vault-plugin-demo.git
+    Target:             HEAD
+    Path:               .
+    SyncWindow:         Sync Allowed
+    Sync Policy:        &lt;none&gt;
+    Sync Status:        OutOfSync from HEAD (b7cec5a)
+    Health Status:      Healthy
+
+    GROUP  KIND    NAMESPACE    NAME            STATUS     HEALTH  HOOK  MESSAGE
+           Secret  mynamespace  example-secret  OutOfSync                secret/example-secret configured
+
+oc extract secret/example-secret -n mynamespace --to=-
+    # sample-secret
+    valor nuevo
+</code></pre></div><p>Recordatorio:</p>
+<div class="codigo"><pre><code>oc extract secret/myargocd-cluster -n myargocd --to=-
+argocd login myargocd-server-myargocd.apps.k8spro.nextret.net
+</code></pre></div><p>Respecto al mensaje que aparece en el hard refresh:</p>
+<div class="codigo"><pre><code>    level=warning 
+    msg=&quot;spec.plugin.name is set, which means this Application 
+    uses a plugin installed in the argocd-cm ConfigMap. 
+    Installing plugins via that ConfigMap is deprecated in Argo CD v2.5. 
+    Starting in Argo CD v2.6, this Application will fail to sync. 
+    Contact your Argo CD admin to make sure an upgrade plan is in place. More info: https://argo-cd.readthedocs.io/en/latest/operator-manual/upgrading/2.4-2.5/&quot;
+</code></pre></div><p>De hecho estar, ya estamos en ArgoCD 2.6 sever y no ha fallado...</p>
+<div class="codigo"><pre><code>argocd version
+    argocd: v2.5.3+0c7de21
+      BuildDate: 2022-11-28T17:22:28Z
+      GitCommit: 0c7de210ae66bf631cc4f27ee1b5cdc0d04c1c96
+      GitTreeState: clean
+      GoVersion: go1.18.8
+      Compiler: gc
+      Platform: windows/amd64
+&gt;&gt;    argocd-server: v2.6.7+unknown
+</code></pre></div><p>En cualquier caso, no es nuevo el tema de deprecar la configuración<br>del plugin AVP con el <code>argocd-cm</code> configMap y sería bueno<br>plantear el uso de contenedores sidecar para este cometido.</p>
+<ul>
+<li><a href="https://github.com/argoproj/argo-cd/issues/11689">https://github.com/argoproj/argo-cd/issues/11689</a><ul>
+<li><a href="https://argo-cd.readthedocs.io/en/stable/user-guide/config-management-plugins/">https://argo-cd.readthedocs.io/en/stable/user-guide/config-management-plugins/</a><ul>
+<li><a href="https://argo-cd.readthedocs.io/en/stable/operator-manual/config-management-plugins/">https://argo-cd.readthedocs.io/en/stable/operator-manual/config-management-plugins/</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</body>
+</html>
